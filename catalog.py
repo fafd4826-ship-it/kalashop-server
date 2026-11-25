@@ -14,26 +14,21 @@ async def refresh():
         print(f"❌ ОШИБКА ПРИ ЗАПРОСЕ: {e}")
         return
         
-    print(f"✅ ПОЛУЧЕНО СЫРЫХ ДАННЫХ: {len(raw)}")
-    
     good = []
     now = time.time()
     
-    # Выведем названия полей первого аккаунта для проверки
-    if len(raw) > 0:
-        print(f"🔍 ПОЛЯ АККАУНТА: {list(raw[0].keys())}")
-        
     for item in raw:
         try:
             seller = item.get("seller") or {}
             if seller.get("positive_feedback", 0) < MIN_SELLER_REVIEWS: 
                 continue
                 
-            quality = item.get('telegram_quality_score') or item.get('quality_score', 0)
+            quality = item.get('telegram_quality_score') or 0
             if quality < MIN_QUALITY_SCORE: 
                 continue
                 
-            reg_date = item.get("telegram_registration_date", 0)
+            # Берем правильные поля из Lolzteam
+            reg_date = item.get("telegram_registration_date") or item.get("published_date", 0)
             age_days = (now - reg_date) / 86400 if reg_date else 0
             
             is_premium = item.get("telegram_premium", False)
@@ -49,8 +44,8 @@ async def refresh():
                 "item_id": item.get("item_id", 0), 
                 "price_rub": price_rub, 
                 "price_stars": price_stars,
-                "country": item.get("country") or item.get("origin") or "Неизвестно",
-                "phone_prefix": item.get("phone_prefix") or item.get("country_code") or "+",
+                "country": item.get("telegram_country") or "Неизвестно", # ИСПРАВЛЕНО
+                "phone_prefix": item.get("phone_prefix") or "+", # ИСПРАВЛЕНО
                 "description": (item.get("description") or "")[:120],
                 "quality_score": quality, 
                 "age_days": age_days,
@@ -58,7 +53,6 @@ async def refresh():
                 "premium_days": premium_days
             })
         except Exception as e:
-            print(f"⚠️ ОШИБКА ПАРСИНГА АККАУНТА: {e}")
             continue
             
     print(f"📦 В КАТАЛОГЕ ПОСЛЕ ФИЛЬТРОВ: {len(good)} аккаунтов")
