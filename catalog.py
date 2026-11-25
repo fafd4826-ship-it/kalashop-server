@@ -1,5 +1,6 @@
 import math
 import time
+import re
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from lolz import search_telegram
 from config import MIN_SELLER_REVIEWS, STAR_RATE_RUB, MIN_QUALITY_SCORE
@@ -27,13 +28,20 @@ async def refresh():
             if quality < MIN_QUALITY_SCORE: 
                 continue
                 
+            # Вычисляем отлегу (берем дату регистрации, если нет — дату публикации)
             reg_date = item.get("telegram_registration_date") or item.get("published_date", 0)
             age_days = (now - reg_date) / 86400 if reg_date else 0
             
-            is_premium = item.get("telegram_premium", False)
+            # Проверяем премиум
+            is_premium = bool(item.get("telegram_premium", False))
             premium_expires = item.get("telegram_premium_expires", 0)
-            premium_days = (premium_expires - now) / 86400 if is_premium else 0
-                
+            premium_days = (premium_expires - now) / 86400 if is_premium and premium_expires else 0
+            
+            # Убираем теги tooltip из описания
+            raw_desc = item.get("description") or ""
+            clean_desc = re.sub(r'\[tooltip=\d+\]', '', raw_desc).replace('[/tooltip]', '')
+            clean_desc = clean_desc[:120] + "..." if len(clean_desc) > 120 else clean_desc
+            
             price_rub = item.get("price", 0)
             cost_in_stars = price_rub / STAR_RATE_RUB
             dynamic_profit = max(10, math.ceil(cost_in_stars * 0.08))
@@ -43,9 +51,9 @@ async def refresh():
                 "item_id": item.get("item_id", 0), 
                 "price_rub": price_rub, 
                 "price_stars": price_stars,
-                "country": item.get("telegram_country") or "Неизвестно",
+                "country": item.get("telegram_country") or "UNKNOWN", 
                 "phone_prefix": item.get("phone_prefix") or "+",
-                "description": (item.get("description") or "")[:120],
+                "description": clean_desc,
                 "quality_score": quality, 
                 "age_days": age_days,
                 "is_premium": is_premium, 
@@ -55,8 +63,6 @@ async def refresh():
             continue
             
     print(f"📦 В КАТАЛОГЕ ПОСЛЕ ФИЛЬТРОВ: {len(good)} аккаунтов")
-    
-    # Очищаем старый список и добавляем новые данные, чтобы main.py их увидел
     CATALOG.clear()
     CATALOG.extend(good)
 
