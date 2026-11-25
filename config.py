@@ -1,0 +1,6 @@
+LOLZTEAM_TOKEN = "eyJ0eXAiOiJKV1QiLCJhbGciOiJSUzUxMiJ9.eyJzdWIiOjEwOTI5MjUwLCJpc3MiOiJsenQiLCJpYXQiOjE3OTU1ODg0NTEsImp0aSI6IjEwNDIxOTAiLCJzY29wZSI6ImJhc2ljIHJlYWQgcG9zdCBjb252ZXJzYXRlIHBheW1lbnQgaW52b2ljZSBjaGF0Ym94IG1hcmtldCIsImV4cCI6MTk1MzI2ODQ1MX0.t4RUg3LkTl7yiOWXefyBMeudAq6jiHx3OBRQ01fe6LgH7ozMCJMP7-vXCWbBjQ8X4xDMNb11cSXFD0gvD07Xd4ahonq4ElDM0Z8RqlXC4HXffzpB1fUL8cJcsUi9jvj2DMwFugpX6ybeEAxx6QxkGILE6_5YZz0XFYfbsOW2Djg"
+BOT_TOKEN = "9159426323:AAEseBYLeiPjTYlkQduSXUQ_2eUZ4z3fsfg"
+WEBAPP_URL = "https://fafd4826-ship-it.github.io/kalashop-web/"
+STAR_RATE_RUB = 1.3         # Курс: сколько рублей вы получаете за 1 звезду
+MIN_SELLER_REVIEWS = 50     # Минимум 50 положительных отзывов
+MIN_QUALITY_SCORE = 80      # Минимальный рейтинг качества (80/100)
