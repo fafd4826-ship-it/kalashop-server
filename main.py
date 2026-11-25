@@ -11,10 +11,11 @@ from aiogram.fsm.storage.memory import MemoryStorage
 from catalog import CATALOG, start_scheduler, refresh
 from config import BOT_TOKEN, WEBAPP_URL, ADMIN_ID
 from db import get_balance, update_balance, add_promo, use_promo, add_purchase, load_json, PURCHASES_FILE
-from lolz import fast_buy
+from lolz import fast_buy, get_telegram_code
 import uvicorn
 from fastapi.middleware.cors import CORSMiddleware
 
+# Фикс для IPv6 (чтобы Render не терял соединение)
 orig_getaddrinfo = socket.getaddrinfo
 def getaddrinfo_ipv4(host, port, family=0, type=0, proto=0, flags=0):
     return orig_getaddrinfo(host, port, socket.AF_INET, type, proto, flags)
@@ -99,8 +100,22 @@ def get_main_kb(user_id):
 
 @dp.message(Command("start"))
 async def start(m: types.Message):
-    text = "👋 <b>Добро пожаловать в магазин!</b>\n\nВыбери раздел в меню ниже 👇"
-    await m.answer(text, reply_markup=get_main_kb(m.from_user.id), parse_mode="HTML")
+    text = (
+        "👋 <b>Добро пожаловать в магазин аккаунтов от Калашовского!</b>\n\n"
+        "Здесь ты можешь купить качественные Telegram-аккаунты. "
+        "Все аккаунты проходят строгую проверку.\n\n"
+        "Выбери нужный раздел в меню ниже 👇"
+    )
+    
+    # Твоя картинка из GitHub
+    photo_url = "https://raw.githubusercontent.com/fafd4826-ship-it/kalashop-web/main/IMG_20261125_234930_839.jpg"
+    
+    await m.answer_photo(
+        photo=photo_url, 
+        caption=text, 
+        reply_markup=get_main_kb(m.from_user.id), 
+        parse_mode="HTML"
+    )
 
 @dp.message(F.text == "👤 Профиль")
 async def profile(m: types.Message):
