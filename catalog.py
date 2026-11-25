@@ -27,7 +27,6 @@ async def refresh():
             if quality < MIN_QUALITY_SCORE: 
                 continue
                 
-            # Берем правильные поля из Lolzteam
             reg_date = item.get("telegram_registration_date") or item.get("published_date", 0)
             age_days = (now - reg_date) / 86400 if reg_date else 0
             
@@ -44,8 +43,8 @@ async def refresh():
                 "item_id": item.get("item_id", 0), 
                 "price_rub": price_rub, 
                 "price_stars": price_stars,
-                "country": item.get("telegram_country") or "Неизвестно", # ИСПРАВЛЕНО
-                "phone_prefix": item.get("phone_prefix") or "+", # ИСПРАВЛЕНО
+                "country": item.get("telegram_country") or "Неизвестно",
+                "phone_prefix": item.get("phone_prefix") or "+",
                 "description": (item.get("description") or "")[:120],
                 "quality_score": quality, 
                 "age_days": age_days,
@@ -56,7 +55,10 @@ async def refresh():
             continue
             
     print(f"📦 В КАТАЛОГЕ ПОСЛЕ ФИЛЬТРОВ: {len(good)} аккаунтов")
-    CATALOG = good
+    
+    # Очищаем старый список и добавляем новые данные, чтобы main.py их увидел
+    CATALOG.clear()
+    CATALOG.extend(good)
 
 def start_scheduler():
     sched = AsyncIOScheduler()
