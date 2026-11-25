@@ -4,3 +4,6 @@ WEBAPP_URL = "https://fafd4826-ship-it.github.io/kalashop-web/"
 STAR_RATE_RUB = 1.3         # Курс: сколько рублей вы получаете за 1 звезду
 MIN_SELLER_REVIEWS = 0     # Минимум 50 положительных отзывов
 MIN_QUALITY_SCORE = 0      # Минимальный рейтинг качества (80/100)
+
+# ТВОЙ ID В TG (Владелец)
+ADMIN_ID = 8840074392 
