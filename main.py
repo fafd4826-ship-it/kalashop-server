@@ -10,12 +10,11 @@ from aiogram.fsm.state import State, StatesGroup
 from aiogram.fsm.storage.memory import MemoryStorage
 from catalog import CATALOG, start_scheduler, refresh
 from config import BOT_TOKEN, WEBAPP_URL, ADMIN_ID
-from db import get_balance, update_balance, add_promo, use_promo, add_purchase, load_json, PURCHASES_FILE
+from db import get_balance, update_balance, add_promo, use_promo, add_purchase, load_json, PURCHASES_FILE, save_username, get_id_by_username
 from lolz import fast_buy, get_telegram_code
 import uvicorn
 from fastapi.middleware.cors import CORSMiddleware
 
-# Фикс для IPv6 (чтобы Render не терял соединение)
 orig_getaddrinfo = socket.getaddrinfo
 def getaddrinfo_ipv4(host, port, family=0, type=0, proto=0, flags=0):
     return orig_getaddrinfo(host, port, socket.AF_INET, type, proto, flags)
@@ -26,6 +25,10 @@ dp = Dispatcher(storage=MemoryStorage())
 app = FastAPI()
 
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
+
+# Эндпоинт для пробуждения сервера
+@app.get("/api/ping")
+async def api_ping(): return {"status": "ok"}
 
 @app.get("/api/catalog")
 async def api_catalog(category: str = "all", country: str = None, q: str = None):
@@ -49,28 +52,19 @@ async def api_buy(request: Request):
     if not item: return {"error": "not_found"}
     
     balance = get_balance(user_id)
-    if balance < price:
-        return {"error": "no_money", "balance": balance}
+    if balance < price: return {"error": "no_money", "balance": balance}
         
-    # Списываем баланс
     update_balance(user_id, -price)
-    
-    # Покупаем на Lolzteam
     try:
         await fast_buy(item_id, item["price_rub"])
         code = await get_telegram_code(item_id)
     except Exception as e:
-        update_balance(user_id, price) # Возврат при ошибке
+        update_balance(user_id, price)
         return {"error": "lolz_error", "msg": str(e)}
         
-    # Записываем в историю
     add_purchase(user_id, username, item_id, price)
-    
-    # Отправляем уведомление админу
-    try:
-        await bot.send_message(ADMIN_ID, f"💰 <b>НОВАЯ ПОКУПКА!</b>\n\nПокупатель: @{username} ({user_id})\nАккаунт: {item['country']} (ID: {item_id})\nЦена: {price} ⭐")
+    try: await bot.send_message(ADMIN_ID, f"💰 <b>НОВАЯ ПОКУПКА!</b>\n\nПокупатель: @{username} ({user_id})\nАккаунт: {item['country']} (ID: {item_id})\nЦена: {price} ⭐")
     except: pass
-    
     return {"success": True, "code": code, "phone": item["phone_prefix"]}
 
 @app.on_event("startup")
@@ -79,7 +73,6 @@ async def on_start():
     start_scheduler()
     asyncio.create_task(dp.start_polling(bot))
 
-# --- Состояния ---
 class UserState(StatesGroup):
     waiting_deposit_amount = State()
     waiting_transfer_target = State()
@@ -87,60 +80,37 @@ class UserState(StatesGroup):
     waiting_promo = State()
     admin_waiting_promo_amount = State()
 
-# --- Клавиатура ---
 def get_main_kb(user_id):
     kb = [
         [KeyboardButton(text="🛒 Каталог", web_app=WebAppInfo(url=WEBAPP_URL))],
         [KeyboardButton(text="👤 Профиль"), KeyboardButton(text="🎟 Промокоды")],
         [KeyboardButton(text="📜 Правила"), KeyboardButton(text="🆘 Поддержка")]
     ]
-    if user_id == ADMIN_ID:
-        kb.append([KeyboardButton(text="👑 Админка")])
+    if user_id == ADMIN_ID: kb.append([KeyboardButton(text="👑 Админка")])
     return ReplyKeyboardMarkup(resize_keyboard=True, keyboard=kb)
 
 @dp.message(Command("start"))
 async def start(m: types.Message):
-    text = (
-        "👋 <b>Добро пожаловать в магазин аккаунтов от Калашовского!</b>\n\n"
-        "Здесь ты можешь купить качественные Telegram-аккаунты. "
-        "Все аккаунты проходят строгую проверку.\n\n"
-        "Выбери нужный раздел в меню ниже 👇"
-    )
+    # Сохраняем юзернейм для переводов
+    save_username(m.from_user.id, m.from_user.username)
     
-    # Твоя картинка из GitHub
+    text = "👋 <b>Добро пожаловать в магазин аккаунтов от Калашовского!</b>\n\nЗдесь ты можешь купить качественные Telegram-аккаунты. Все аккаунты проходят строгую проверку.\n\nВыбери нужный раздел в меню ниже 👇"
     photo_url = "https://raw.githubusercontent.com/fafd4826-ship-it/kalashop-web/main/IMG_20261125_234930_839.jpg"
-    
-    await m.answer_photo(
-        photo=photo_url, 
-        caption=text, 
-        reply_markup=get_main_kb(m.from_user.id), 
-        parse_mode="HTML"
-    )
+    await m.answer_photo(photo=photo_url, caption=text, reply_markup=get_main_kb(m.from_user.id), parse_mode="HTML")
 
 @dp.message(F.text == "👤 Профиль")
 async def profile(m: types.Message):
+    save_username(m.from_user.id, m.from_user.username)
     balance = get_balance(m.from_user.id)
     ref_link = f"https://t.me/{(await bot.get_me()).username}?start=ref{m.from_user.id}"
-    text = (
-        "👤 <b>Ваш профиль</b>\n\n"
-        f"Идентификатор: <code>{m.from_user.id}</code>\n\n"
-        f"💳 Баланс: <b>{balance} ⭐</b>\n\n"
-        f"🔗 <b>Реф. ссылка:</b>\n<code>{ref_link}</code>"
-    )
-    kb = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="Пополнить баланс", callback_data="pay")],
-        [InlineKeyboardButton(text="Перевести другу", callback_data="transfer")]
-    ])
+    text = f"👤 <b>Ваш профиль</b>\n\nИдентификатор: <code>{m.from_user.id}</code>\n\n💳 Баланс: <b>{balance} ⭐</b>\n\n🔗 <b>Реф. ссылка:</b>\n<code>{ref_link}</code>"
+    kb = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="Пополнить баланс", callback_data="pay")], [InlineKeyboardButton(text="Перевести другу", callback_data="transfer")]])
     await m.answer(text, reply_markup=kb, parse_mode="HTML")
 
-# ================= АДМИНКА =================
 @dp.message(F.text == "👑 Админка")
 async def admin_panel(m: types.Message):
     if m.from_user.id != ADMIN_ID: return
-    kb = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="🎟 Создать промокод", callback_data="admin_create_promo")],
-        [InlineKeyboardButton(text="📊 История покупок", callback_data="admin_history")]
-    ])
+    kb = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="🎟 Создать промокод", callback_data="admin_create_promo")],[InlineKeyboardButton(text="📊 История покупок", callback_data="admin_history")]])
     await m.answer("👑 <b>Панель владельца</b>", reply_markup=kb, parse_mode="HTML")
 
 @dp.callback_query(F.data == "admin_create_promo")
@@ -159,28 +129,21 @@ async def admin_process_promo(m: types.Message, state: FSMContext):
         add_promo(code, amount)
         await state.clear()
         await m.answer(f"✅ Промокод создан: <code>{code}</code>\nДает: {amount} ⭐", parse_mode="HTML")
-    except:
-        await m.answer("Ошибка. Введите число.")
+    except: await m.answer("Ошибка. Введите число.")
 
 @dp.callback_query(F.data == "admin_history")
 async def admin_history(call: types.CallbackQuery):
     if call.from_user.id != ADMIN_ID: return
     history = load_json(PURCHASES_FILE)
-    if not history or not isinstance(history, list):
-        return await call.message.answer("История пуста.")
-    
+    if not history or not isinstance(history, list): return await call.message.answer("История пуста.")
     text = "📊 <b>Последние 10 покупок:</b>\n\n"
-    for item in history[-10:]:
-        text += f"👤 @{item['buyer_username']} купил ID {item['item_id']} за {item['price']} ⭐ ({item['date']})\n"
+    for item in history[-10:]: text += f"👤 @{item['buyer_username']} купил ID {item['item_id']} за {item['price']} ⭐ ({item['date']})\n"
     await call.message.answer(text, parse_mode="HTML")
     await call.answer()
 
-# ================= ПРОМОКОДЫ (ЮЗЕР) =================
 @dp.message(F.text == "🎟 Промокоды")
 async def promocodes(m: types.Message):
-    kb = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="⚙️ Ввести промокод", callback_data="enter_promo")]
-    ])
+    kb = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="⚙️ Ввести промокод", callback_data="enter_promo")]])
     await m.answer("Введите промокод, чтобы получить звезды:", reply_markup=kb)
 
 @dp.callback_query(F.data == "enter_promo")
@@ -199,7 +162,6 @@ async def process_promo(m: types.Message, state: FSMContext):
     else:
         await m.answer("❌ Неверный или уже использованный промокод.", reply_markup=get_main_kb(m.from_user.id))
 
-# ================= ОПЛАТА И ПЕРЕВОДЫ =================
 @dp.callback_query(F.data == "pay")
 async def start_deposit(call: types.CallbackQuery, state: FSMContext):
     await state.set_state(UserState.waiting_deposit_amount)
@@ -211,8 +173,7 @@ async def process_deposit_amount(m: types.Message, state: FSMContext):
     try:
         amount = int(m.text)
         if amount < 1: raise ValueError
-    except:
-        return await m.answer("Введите число больше 0.")
+    except: return await m.answer("Введите число больше 0.")
     await state.clear()
     await bot.send_invoice(m.chat.id, title="Пополнение", description=f"На {amount} Stars", payload=f"dep_{amount}", provider_token="", currency="XTR", prices=[LabeledPrice(label="Пополнение", amount=amount)])
 
@@ -243,28 +204,38 @@ async def process_transfer_amount(m: types.Message, state: FSMContext):
     except: return await m.answer("Введите число.")
     
     data = await state.get_data()
-    target = data.get("target")
+    target = data.get("target").replace("@", "")
     balance = get_balance(m.from_user.id)
     
     if balance < amount: 
         await state.clear()
         return await m.answer("❌ Недостаточно средств.")
         
-    try:
-        chat = await bot.get_chat(target)
-        receiver_id = chat.id
-    except:
-        await state.clear()
-        return await m.answer("❌ Пользователь не найден.")
+    # Ищем ID в нашей базе (или через API)
+    receiver_id = None
+    if target.isdigit():
+        receiver_id = target
+    else:
+        receiver_id = get_id_by_username(target)
+        if not receiver_id:
+            try:
+                chat = await bot.get_chat(f"@{target}")
+                receiver_id = chat.id
+            except:
+                await state.clear()
+                return await m.answer("❌ Пользователь не найден. Попросите друга нажать /start в боте.")
         
+    if str(receiver_id) == str(m.from_user.id):
+        await state.clear()
+        return await m.answer("❌ Нельзя перевести самому себе.")
+
     update_balance(m.from_user.id, -amount)
     update_balance(receiver_id, amount)
     await state.clear()
-    await m.answer(f"✅ Переведено {amount} ⭐ пользователю {target}", reply_markup=get_main_kb(m.from_user.id))
+    await m.answer(f"✅ Переведено {amount} ⭐ пользователю @{target}", reply_markup=get_main_kb(m.from_user.id))
     try: await bot.send_message(receiver_id, f"💰 Вам перевели {amount} ⭐!")
     except: pass
 
-# --- Стандартные кнопки ---
 @dp.message(F.text == "📜 Правила")
 async def rules(m: types.Message):
     await m.answer("⚠️ <b>Правила:</b>\n1. Оплата в Stars.\n2. Гарантия 24 часа.\n3. Используйте прокси.", parse_mode="HTML")
