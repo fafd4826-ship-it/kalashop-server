@@ -46,7 +46,7 @@ async def api_buy(request: Request):
     
     try:
         item_id = int(data.get("item_id"))
-        price = int(data.get("price")) # Принудительно делаем целым числом
+        price = int(data.get("price"))
     except:
         return {"error": "invalid_data", "msg": "Неверный формат данных"}
     
@@ -62,7 +62,7 @@ async def api_buy(request: Request):
         )
         return {"success": True, "status": "invoice_sent"}
     except Exception as e:
-        print(f"ОШИБКА ОТПРАВКИ СЧЕТА: {e}") # Выведет в логи Render
+        print(f"ОШИБКА ОТПРАВКИ СЧЕТА: {e}")
         return {"error": "tg_error", "msg": str(e)}
 
 async def balance_checker():
@@ -70,7 +70,7 @@ async def balance_checker():
         balance = await get_lolz_balance()
         if balance < 250:
             try:
-                await bot.send_message(ADMIN_ID, f"⚠️ <b>ВНИМАНИЕ!</b>\nБаланс Lolzteam упал ниже 250₽.\nТекущий баланс: <b>{balance}₽</b>\nСрочно пополните счет, иначе бот не сможет покупать аккаунты!")
+                await bot.send_message(ADMIN_ID, f"⚠️ <b>ВНИМАНИЕ!</b>\nБаланс Lolzteam упал ниже 250₽.\nТекущий баланс: <b>{balance}₽</b>\nСрочно пополните счет!")
             except: pass
         await asyncio.sleep(3600)
 
@@ -83,6 +83,7 @@ async def on_start():
 
 class UserState(StatesGroup):
     waiting_promo = State()
+    waiting_review = State()  # Новое состояние для отзывов
     admin_waiting_promo_amount = State()
     admin_broadcast = State()
 
@@ -125,6 +126,11 @@ async def success_pay(m: types.Message):
             phone = item['phone_prefix'] if item else "+"
             
             await m.answer(f"✅ <b>Успешно куплено!</b>\n\nНомер: <code>{phone}</code>\nКод: <code>{code}</code>\n\nНе забудьте использовать прокси!", reply_markup=get_main_kb(m.from_user.id), parse_mode="HTML")
+            
+            # Предлагаем оставить отзыв
+            kb = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="✍️ Оставить отзыв", callback_data="leave_review")]])
+            await m.answer("Пожалуйста, оставьте отзыв о нашем магазине! Ваше мнение очень важно для нас.", reply_markup=kb)
+            
             add_purchase(m.from_user.id, m.from_user.username or "unknown", item_id, price_stars)
             try: await bot.send_message(ADMIN_ID, f"💰 <b>НОВАЯ ПОКУПКА!</b>\n\nПокупатель: @{m.from_user.username} ({m.from_user.id})\nАккаунт: {item['country']} (ID: {item_id})\nЦена: {price_stars} ⭐")
             except: pass
@@ -138,6 +144,28 @@ async def success_pay(m: types.Message):
             else:
                 await m.answer(f"❌ Ошибка при покупке. Напишите в поддержку @aoswat для возврата средств.\nОшибка: {e}")
 
+# ================= ОТЗЫВЫ =================
+@dp.callback_query(F.data == "leave_review")
+async def ask_review(call: types.CallbackQuery, state: FSMContext):
+    await state.set_state(UserState.waiting_review)
+    await call.message.answer("Напишите ваш отзыв одним сообщением:")
+    await call.answer()
+
+@dp.message(UserState.waiting_review)
+async def process_review(m: types.Message, state: FSMContext):
+    await state.clear()
+    if m.text:
+        review_text = f"⭐ <b>Новый отзыв!</b>\n\nОт: @{m.from_user.username or m.from_user.first_name}\n\n{m.text}"
+        try:
+            # Отправляем в канал с отзывами
+            await bot.send_message("@otzivikalasovshkogo", review_text, parse_mode="HTML")
+            await m.answer("✅ Спасибо! Ваш отзыв отправлен в наш канал.", reply_markup=get_main_kb(m.from_user.id))
+        except Exception as e:
+            await m.answer("✅ Спасибо за отзыв! (Но не удалось отправить в канал, проверьте права бота)", reply_markup=get_main_kb(m.from_user.id))
+    else:
+        await m.answer("Пожалуйста, отправьте текстовый отзыв.", reply_markup=get_main_kb(m.from_user.id))
+
+# ================= АДМИНКА =================
 @dp.message(F.text == "👑 Админка")
 async def admin_panel(m: types.Message):
     if m.from_user.id != ADMIN_ID: return
@@ -152,7 +180,7 @@ async def admin_panel(m: types.Message):
 async def start_broadcast(call: types.CallbackQuery, state: FSMContext):
     if call.from_user.id != ADMIN_ID: return
     await state.set_state(UserState.admin_broadcast)
-    await call.message.answer("Отправьте сообщение (текст, фото или видео) для рассылки всем пользователям:")
+    await call.message.answer("Отправьте сообщение для рассылки всем пользователям:")
     await call.answer()
 
 @dp.message(UserState.admin_broadcast)
@@ -202,6 +230,7 @@ async def admin_history(call: types.CallbackQuery):
     await call.message.answer(text, parse_mode="HTML")
     await call.answer()
 
+# ================= ПРОМОКОДЫ =================
 @dp.message(F.text == "🎟 Промокоды")
 async def promocodes(m: types.Message):
     kb = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="⚙️ Ввести промокод", callback_data="enter_promo")]])
