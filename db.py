@@ -17,7 +17,6 @@ def save_json(filename, data):
     with open(filename, "w") as f:
         json.dump(data, f, indent=4)
 
-# --- Баланс ---
 def get_balance(user_id):
     db = load_json(USERS_FILE)
     return db.get(str(user_id), 0)
@@ -28,23 +27,28 @@ def update_balance(user_id, amount):
     db[uid] = db.get(uid, 0) + amount
     save_json(USERS_FILE, db)
 
-# --- Юзернеймы ---
+# ИСПРАВЛЕНО: Теперь при старте юзер добавляется в базу для рассылки
 def save_username(user_id, username):
-    if not username: return
-    db = load_json(NAMES_FILE)
-    db[username.lower()] = user_id
-    save_json(NAMES_FILE, db)
+    # Добавляем в общую базу (даже если баланс 0)
+    db = load_json(USERS_FILE)
+    if str(user_id) not in db:
+        db[str(user_id)] = 0
+        save_json(USERS_FILE, db)
+        
+    # Сохраняем юзернейм для переводов
+    if username:
+        ndb = load_json(NAMES_FILE)
+        ndb[username.lower()] = user_id
+        save_json(NAMES_FILE, ndb)
 
 def get_id_by_username(username):
     db = load_json(NAMES_FILE)
     return db.get(username.lower().replace("@", ""))
 
-# --- Все пользователи (для рассылки) ---
 def get_all_users():
     db = load_json(USERS_FILE)
     return list(db.keys())
 
-# --- Промокоды ---
 def add_promo(code, amount):
     db = load_json(PROMOS_FILE)
     db[code.upper()] = {"amount": amount, "uses_left": 1}
@@ -60,7 +64,6 @@ def use_promo(code):
         return amount
     return None
 
-# --- История покупок ---
 def add_purchase(buyer_id, buyer_username, item_id, price):
     db = load_json(PURCHASES_FILE)
     if not isinstance(db, list): db = []
