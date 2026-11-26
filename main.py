@@ -61,9 +61,13 @@ async def api_buy(request: Request):
     data = await request.json()
     user_id = data.get("user_id")
     item_id = data.get("item_id")
+    
+    # Достаем цену, которую фронтенд передает
+    price = data.get("price", 0)
 
     try:
-        await fast_buy(item_id, 0) 
+        # Передаем цену в функцию покупки (Lolz требует ее)
+        await fast_buy(item_id, price) 
         
         keyboard = InlineKeyboardMarkup(inline_keyboard=[
             [InlineKeyboardButton(text="🔑 Получить номер и код", callback_data=f"getcode_{item_id}")]
@@ -84,41 +88,4 @@ async def api_buy(request: Request):
         elif error_str == "no_lolz_funds":
             return JSONResponse({"error": "no_lolz_funds"})
         else:
-            return JSONResponse({"error": f"Ошибка: {error_str}"})
-
-@dp.callback_query(lambda c: c.data.startswith('getcode_'))
-async def process_get_code(callback_query: types.CallbackQuery):
-    item_id = int(callback_query.data.split('_')[1])
-    msg = await callback_query.message.answer("⏳ Запрашиваю данные у Lolz...")
-    try:
-        result_text = await get_telegram_code(item_id)
-        await msg.edit_text(f"Данные аккаунта:\n\n{result_text}")
-    except Exception as e:
-        if "wait_please" in str(e):
-            await msg.edit_text(
-                "⏳ Lolz еще обрабатывает покупку. Подождите 1-2 минуты и нажмите кнопку снова.", 
-                reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-                    [InlineKeyboardButton(text="🔄 Попробовать снова", callback_data=f"getcode_{item_id}")]
-                ])
-            )
-        else:
-            await msg.edit_text(f"❌ Ошибка получения: {e}")
-
-@dp.message(Command("start"))
-async def start_cmd(message: types.Message):
-    kb = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="🛒 Открыть магазин", web_app=types.WebAppInfo(url=WEBAPP_URL))]
-    ])
-    await message.answer("Добро пожаловать в магазин!", reply_markup=kb)
-
-async def main():
-    start_scheduler()
-    config = uvicorn.Config(app, host="0.0.0.0", port=8000)
-    server = uvicorn.Server(config)
-    await asyncio.gather(
-        dp.start_polling(bot),
-        server.serve()
-    )
-
-if __name__ == "__main__":
-    asyncio.run(main())
+            return JSONResponse({"error": f"{error_str}"})
