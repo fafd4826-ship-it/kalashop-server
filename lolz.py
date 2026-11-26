@@ -23,7 +23,6 @@ async def search_telegram(country: str = None, query: str = None):
                 data = r.json()
                 items = data.get("items", [])
                 if not items: 
-                    print("⚠️ Lolz вернул пустой список items")
                     break
                 all_items.extend(items)
             except Exception as e: 
@@ -33,20 +32,23 @@ async def search_telegram(country: str = None, query: str = None):
 
 async def fast_buy(item_id: int, price: float):
     async with httpx.AsyncClient() as client:
-        # Перебираем возможные эндпоинты для покупки
+        # ВАЖНО: Для Lolz нужен price, иначе он не найдет страницу
+        payload = {"item_id": item_id, "price": price}
+        
+        # Пробуем эндпоинты покупки. Если один не работает - пробуем другой.
         urls = [
-            f"{BASE_URL}/market/item/buy",
             f"{BASE_URL}/item/fast-buy",
-            f"{BASE_URL}/item/buy"
+            f"{BASE_URL}/item/buy",
+            f"{BASE_URL}/market/item/buy"
         ]
         
         last_error = ""
         
         for url in urls:
             try:
-                r = await client.post(url, headers=HEADERS, json={"item_id": item_id})
+                r = await client.post(url, headers=HEADERS, json=payload)
                 
-                # Если страница не найдена (404), пробуем следующий URL
+                # Если 404 - пробуем следующий
                 if r.status_code == 404:
                     continue
                     
@@ -58,18 +60,15 @@ async def fast_buy(item_id: int, price: float):
                         raise Exception("no_lolz_funds")
                     raise Exception(f"Ошибка API: {r.text}")
                     
-                # Если 200 ОК - значит купили!
                 return r.json()
             except Exception as e:
                 last_error = str(e)
                 continue
                 
-        # Если ни один URL не сработал
-        raise Exception(f"Не удалось найти рабочий метод. Последняя ошибка: {last_error}")
+        raise Exception(f"Не удалось купить. Ошибка: {last_error if last_error else 'Lolz не отвечает'}")
 
 async def get_telegram_code(item_id: int):
     async with httpx.AsyncClient() as client:
-        # Перебираем возможные эндпоинты для получения кода
         urls = [
             f"{BASE_URL}/market/item/check-account",
             f"{BASE_URL}/item/check-account"
