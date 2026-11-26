@@ -2,6 +2,7 @@ import asyncio
 import socket
 import os
 from fastapi import FastAPI, Request
+from fastapi.responses import JSONResponse
 from aiogram import Bot, Dispatcher, types, F
 from aiogram.types import WebAppInfo, InlineKeyboardMarkup, InlineKeyboardButton, ReplyKeyboardMarkup, KeyboardButton, LabeledPrice, PreCheckoutQuery
 from aiogram.filters import Command
@@ -26,6 +27,11 @@ app = FastAPI()
 
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
 
+# Глобальный перехватчик ошибок (чтобы сайт всегда получал JSON, а не HTML)
+@app.exception_handler(Exception)
+async def global_exception_handler(request: Request, exc: Exception):
+    return JSONResponse(status_code=500, content={"error": "server_error", "msg": str(exc)})
+
 @app.get("/api/ping")
 async def api_ping(): return {"status": "ok"}
 
@@ -41,10 +47,9 @@ async def api_catalog(category: str = "all", country: str = None, q: str = None)
 
 @app.post("/api/buy")
 async def api_buy(request: Request):
-    data = await request.json()
-    user_id = data.get("user_id")
-    
     try:
+        data = await request.json()
+        user_id = data.get("user_id")
         item_id = int(data.get("item_id"))
         price = int(data.get("price"))
     except:
@@ -53,12 +58,15 @@ async def api_buy(request: Request):
     item = next((i for i in CATALOG if i["item_id"] == item_id), None)
     if not item: return {"error": "not_found", "msg": "Аккаунт уже продан"}
     
-    # 1. ПРОВЕРКА БАЛАНСА LOLZ ПЕРЕД СЧЕТОМ
-    balance = await get_lolz_balance()
-    if balance < item["price_rub"]:
-        return {"error": "no_lolz_funds", "msg": "На балансе магазина недостаточно средств. Выберите аккаунт дешевле."}
+    # Безопасная проверка баланса (если упадет - пропустим)
+    try:
+        balance = await get_lolz_balance()
+        if balance > 0 and balance < item["price_rub"]:
+            return {"error": "no_lolz_funds", "msg": "На балансе магазина недостаточно средств. Выберите дешевле."}
+    except Exception as e:
+        print(f"Ошибка проверки баланса: {e}")
+        pass
 
-    # 2. ВЫСТАВЛЕНИЕ СЧЕТА
     try:
         await bot.send_invoice(
             chat_id=user_id, title=f"Аккаунт {item['country']}",
@@ -68,13 +76,12 @@ async def api_buy(request: Request):
         )
         return {"success": True, "status": "invoice_sent"}
     except Exception as e:
-        print(f"ОШИБКА ОТПРАВКИ СЧЕТА: {e}")
         return {"error": "tg_error", "msg": str(e)}
 
 async def balance_checker():
     while True:
         balance = await get_lolz_balance()
-        if balance < 250:
+        if 0 < balance < 250:
             try:
                 await bot.send_message(ADMIN_ID, f"⚠️ <b>ВНИМАНИЕ!</b>\nБаланс Lolzteam упал ниже 250₽.\nТекущий баланс: <b>{balance}₽</b>\nСрочно пополните счет!")
             except: pass
@@ -109,6 +116,13 @@ async def start(m: types.Message):
     photo_url = "https://raw.githubusercontent.com/fafd4826-ship-it/kalashop-web/main/IMG_20261125_234930_839.jpg"
     await m.answer_photo(photo=photo_url, caption=text, reply_markup=get_main_kb(m.from_user.id), parse_mode="HTML")
 
+@dp.message(Command("check"))
+async def check_balance_cmd(m: types.Message):
+    if m.from_user.id != ADMIN_ID: return
+    await m.answer("⏳ Запрашиваю баланс у Lolzteam...")
+    balance = await get_lolz_balance()
+    await m.answer(f"Текущий баланс по API: <b>{balance}₽</b>", parse_mode="HTML")
+
 @dp.pre_checkout_query()
 async def pre_checkout(query: PreCheckoutQuery): 
     await bot.answer_pre_checkout_query(query.id, ok=True)
@@ -141,7 +155,6 @@ async def success_pay(m: types.Message):
             except: pass
             
         except Exception as e:
-            # Если аккаунт уже кто-то купил (ошибка 400)
             error_msg = str(e)
             await m.answer(f"❌ <b>Ошибка покупки:</b>\n{error_msg}\n\nСкорее всего, этот аккаунт уже купил кто-то другой, пока вы оплачивали. Напишите @aoswat для возврата звезд.", reply_markup=get_main_kb(m.from_user.id), parse_mode="HTML")
             try: await bot.send_message(ADMIN_ID, f"⚠️ ОШИБКА ПОКУПКИ:\nПользователь @{m.from_user.username} оплатил ID {item_id}, но Lolz выдал ошибку: {error_msg}\nЗвезды нужно вернуть вручную.")
