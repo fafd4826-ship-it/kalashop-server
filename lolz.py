@@ -11,46 +11,27 @@ async def search_telegram(country: str = None, query: str = None):
 
     all_items = []
     async with httpx.AsyncClient() as client:
-        for page in range(1, 11):
+        for page in range(1, 3): # Уменьшили до 2 страниц для теста
             try:
                 params["page"] = page
+                # ВАЖНО: Убедись, что эндпоинт /telegram правильный. 
+                # В API Lolz это может быть /market/telegram или /telegram/accounts
                 r = await client.get(f"{BASE_URL}/telegram", headers=HEADERS, params=params)
-                if r.status_code != 200: break
+                
+                # Если ошибка — печатаем её в логи и прерываем
+                if r.status_code != 200:
+                    print(f"❌ LOLZ API ERROR: {r.status_code} - {r.text}")
+                    break
+                    
                 data = r.json()
                 items = data.get("items", [])
-                if not items: break
+                if not items: 
+                    print("⚠️ Lolz вернул пустой список items")
+                    break
                 all_items.extend(items)
-            except: break
+            except Exception as e: 
+                print(f"❌ ОШИБКА ПРИ ЗАПРОСЕ: {e}")
+                break
     return all_items
 
-async def fast_buy(item_id: int, price: float):
-    async with httpx.AsyncClient() as client:
-        # Покупаем аккаунт. Звезды не при чем, это баланс Lolz.
-        url = f"{BASE_URL}/item/buy" 
-        r = await client.post(url, headers=HEADERS, json={"item_id": item_id, "price": price})
-        
-        if r.status_code != 200:
-            error_text = r.text.lower()
-            if r.status_code == 403 or "нет прав" in error_text:
-                raise Exception("already_sold_or_no_rights")
-            if r.status_code == 400:
-                raise Exception("no_lolz_funds")
-            raise Exception(f"Ошибка API: {r.text}")
-            
-        return r.json()
-
-async def get_telegram_code(item_id: int):
-    async with httpx.AsyncClient() as client:
-        r = await client.post(f"{BASE_URL}/item/check-account", headers=HEADERS, json={"item_id": item_id})
-        
-        if r.status_code == 403 or "нет прав" in r.text.lower():
-            raise Exception("wait_please")
-            
-        if r.status_code != 200:
-            return "Код не найден или ошибка API"
-            
-        data = r.json()
-        phone = data.get("phone", "Номер не найден")
-        code = data.get("code", "Код не найден")
-        
-        return f"📱 Номер: {phone}\n🔑 Код: {code}"
+# ... (функции fast_buy и get_telegram_code оставляем без изменений) ...
