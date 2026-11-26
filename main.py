@@ -62,12 +62,12 @@ async def api_buy(request: Request):
     user_id = data.get("user_id")
     item_id = data.get("item_id")
     
-    # Достаем цену, которую фронтенд передает
-    price = data.get("price", 0)
+    # Получаем цену в рублях из запроса
+    price_rub = data.get("price", 0)
 
     try:
-        # Передаем цену в функцию покупки (Lolz требует ее)
-        await fast_buy(item_id, price) 
+        # Передаем цену в рублях в функцию покупки
+        await fast_buy(item_id, price_rub) 
         
         keyboard = InlineKeyboardMarkup(inline_keyboard=[
             [InlineKeyboardButton(text="🔑 Получить номер и код", callback_data=f"getcode_{item_id}")]
