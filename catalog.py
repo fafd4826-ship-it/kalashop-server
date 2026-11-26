@@ -7,6 +7,21 @@ from config import MIN_SELLER_REVIEWS, STAR_RATE_RUB, MIN_QUALITY_SCORE
 
 CATALOG = []
 
+# Словарь кодов стран (если API не отдает префикс)
+PHONE_CODES = {
+    "RU": "+7", "KZ": "+7", "US": "+1", "CA": "+1", "GB": "+44", "UA": "+380",
+    "BY": "+375", "UZ": "+998", "KG": "+996", "TJ": "+992", "AM": "+374",
+    "AZ": "+994", "GE": "+995", "MD": "+373", "IN": "+91", "ID": "+62",
+    "BD": "+880", "PH": "+63", "VN": "+84", "TH": "+66", "MY": "+60",
+    "TR": "+90", "BR": "+55", "MX": "+52", "AR": "+54", "CL": "+56",
+    "CO": "+57", "PE": "+51", "DE": "+49", "FR": "+33", "IT": "+39",
+    "ES": "+34", "PL": "+48", "NL": "+31", "BE": "+32", "SE": "+46",
+    "CH": "+41", "AT": "+43", "PT": "+351", "GR": "+30", "CZ": "+420",
+    "RO": "+40", "HU": "+36", "BG": "+359", "HR": "+385", "RS": "+381",
+    "SK": "+421", "SI": "+386", "LT": "+370", "LV": "+371", "EE": "+372",
+    "FI": "+358", "NO": "+47", "DK": "+45", "IE": "+353"
+}
+
 async def refresh():
     global CATALOG
     try:
@@ -28,19 +43,35 @@ async def refresh():
             if quality < MIN_QUALITY_SCORE: 
                 continue
                 
-            # Вычисляем отлегу (берем дату регистрации, если нет — дату публикации)
-            reg_date = item.get("telegram_registration_date") or item.get("published_date", 0)
-            age_days = (now - reg_date) / 86400 if reg_date else 0
+            # Безопасный парсинг даты
+            reg_date = item.get("telegram_registration_date")
+            if not reg_date:
+                age_days = 0
+            else:
+                try: age_days = (now - float(reg_date)) / 86400
+                except: age_days = 0
             
-            # Проверяем премиум
+            # Безопасный парсинг премиума
             is_premium = bool(item.get("telegram_premium", False))
-            premium_expires = item.get("telegram_premium_expires", 0)
-            premium_days = (premium_expires - now) / 86400 if is_premium and premium_expires else 0
+            premium_expires = item.get("telegram_premium_expires")
+            if is_premium and premium_expires:
+                try: premium_days = (float(premium_expires) - now) / 86400
+                except: premium_days = 0
+            else:
+                premium_days = 0
             
-            # Убираем теги tooltip из описания
+            # Чистим описание
             raw_desc = item.get("description") or ""
             clean_desc = re.sub(r'\[tooltip=\d+\]', '', raw_desc).replace('[/tooltip]', '')
             clean_desc = clean_desc[:120] + "..." if len(clean_desc) > 120 else clean_desc
+            
+            country = item.get("telegram_country") or item.get("origin") or "UNKNOWN"
+            country_upper = str(country).upper()
+            
+            # Определяем код страны (если префикс пустой, берем из словаря)
+            prefix = item.get("phone_prefix")
+            if not prefix or prefix == "+":
+                prefix = PHONE_CODES.get(country_upper, "+")
             
             price_rub = item.get("price", 0)
             cost_in_stars = price_rub / STAR_RATE_RUB
@@ -51,8 +82,8 @@ async def refresh():
                 "item_id": item.get("item_id", 0), 
                 "price_rub": price_rub, 
                 "price_stars": price_stars,
-                "country": item.get("telegram_country") or "UNKNOWN", 
-                "phone_prefix": item.get("phone_prefix") or "+",
+                "country": country_upper, 
+                "phone_prefix": prefix,
                 "description": clean_desc,
                 "quality_score": quality, 
                 "age_days": age_days,
