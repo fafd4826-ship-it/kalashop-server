@@ -15,81 +15,52 @@ async def search_telegram(country: str = None, query: str = None):
             try:
                 params["page"] = page
                 r = await client.get(f"{BASE_URL}/telegram", headers=HEADERS, params=params)
-                
-                if r.status_code != 200:
-                    print(f"❌ LOLZ API ERROR: {r.status_code} - {r.text}")
-                    break
-                    
+                if r.status_code != 200: break
                 data = r.json()
                 items = data.get("items", [])
-                if not items: 
-                    break
+                if not items: break
                 all_items.extend(items)
-            except Exception as e: 
-                print(f"❌ ОШИБКА ПРИ ЗАПРОСЕ: {e}")
-                break
+            except: break
     return all_items
 
 async def fast_buy(item_id: int, price: float):
     async with httpx.AsyncClient() as client:
-        # ВАЖНО: Для Lolz нужен price, иначе он не найдет страницу
         payload = {"item_id": item_id, "price": price}
         
-        # Пробуем эндпоинты покупки. Если один не работает - пробуем другой.
-        urls = [
-            f"{BASE_URL}/item/fast-buy",
-            f"{BASE_URL}/item/buy",
-            f"{BASE_URL}/market/item/buy"
-        ]
+        # Оставляем только один самый вероятный эндпоинт для покупки
+        # (Если Lolz опять выдаст 404, мы поймем, что дело в токене)
+        url = f"{BASE_URL}/item/buy"
         
-        last_error = ""
+        r = await client.post(url, headers=HEADERS, json=payload)
         
-        for url in urls:
-            try:
-                r = await client.post(url, headers=HEADERS, json=payload)
+        # Если Lolz вернул ошибку, мы покажем её пользователю, а не будем молчать
+        if r.status_code != 200:
+            # Если 401/403 - скорее всего токен без прав
+            if r.status_code in [401, 403]:
+                raise Exception(f"У токена нет прав на покупку! Код: {r.status_code}. Ответ: {r.text}")
+            
+            # Если 404 - возможно, эндпоинт неверный
+            if r.status_code == 404:
+                raise Exception(f"Lolz пишет 'Страница не найдена'. Возможно, неверный URL в коде.")
                 
-                # Если 404 - пробуем следующий
-                if r.status_code == 404:
-                    continue
-                    
-                if r.status_code != 200:
-                    error_text = r.text.lower()
-                    if r.status_code == 403 or "нет прав" in error_text:
-                        raise Exception("already_sold_or_no_rights")
-                    if r.status_code == 400:
-                        raise Exception("no_lolz_funds")
-                    raise Exception(f"Ошибка API: {r.text}")
-                    
-                return r.json()
-            except Exception as e:
-                last_error = str(e)
-                continue
-                
-        raise Exception(f"Не удалось купить. Ошибка: {last_error if last_error else 'Lolz не отвечает'}")
+            raise Exception(f"Ошибка Lolz ({r.status_code}): {r.text}")
+            
+        return r.json()
 
 async def get_telegram_code(item_id: int):
     async with httpx.AsyncClient() as client:
-        urls = [
-            f"{BASE_URL}/market/item/check-account",
-            f"{BASE_URL}/item/check-account"
-        ]
+        # Аналогично для получения кода
+        url = f"{BASE_URL}/item/check-account"
+        r = await client.post(url, headers=HEADERS, json={"item_id": item_id})
         
-        for url in urls:
-            r = await client.post(url, headers=HEADERS, json={"item_id": item_id})
+        if r.status_code == 403 or "нет прав" in r.text.lower():
+            raise Exception("wait_please")
             
-            if r.status_code == 404:
-                continue
-                
-            if r.status_code == 403 or "нет прав" in r.text.lower():
-                raise Exception("wait_please")
-                
-            if r.status_code != 200:
-                return "Код не найден или ошибка API"
-                
-            data = r.json()
-            phone = data.get("phone", "Номер не найден")
-            code = data.get("code", "Код не найден")
+        if r.status_code != 200:
+            return f"Ошибка API Lolz ({r.status_code}): {r.text}"
             
-            return f"📱 Номер: {phone}\n🔑 Код: {code}"
-            
-        return "Не удалось найти эндпоинт для получения кода"
+        data = r.json()
+        phone = data.get("phone", "Номер не найден")
+        code = data.get("code", "Код не найден")
+        
+        return f"📱 Номер: {phone}\n🔑 Код: {code}"
