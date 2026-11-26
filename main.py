@@ -1,21 +1,19 @@
 import asyncio
 import socket
-import os
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 from aiogram import Bot, Dispatcher, types
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.filters import Command
-from aiogram.fsm.context import FSMContext
-from aiogram.fsm.state import State, StatesGroup
 from aiogram.fsm.storage.memory import MemoryStorage
 from catalog import CATALOG, start_scheduler
-from config import BOT_TOKEN, WEBAPP_URL, ADMIN_ID
-from db import add_purchase, get_all_users
+from config import BOT_TOKEN, WEBAPP_URL
+from db import add_purchase
 from lolz import fast_buy, get_telegram_code
 import uvicorn
 from fastapi.middleware.cors import CORSMiddleware
 
+# Фикс для IPv4 (чтобы Render не тупил с подключением к Telegram)
 orig_getaddrinfo = socket.getaddrinfo
 def getaddrinfo_ipv4(host, port, family=0, type=0, proto=0, flags=0):
     return orig_getaddrinfo(host, port, socket.AF_INET, type, proto, flags)
@@ -35,11 +33,18 @@ async def global_exception_handler(request: Request, exc: Exception):
 async def api_ping(): return {"status": "ok"}
 
 @app.get("/api/catalog")
-async def api_catalog(category: str = "all"):
+async def api_catalog(category: str = "all", q: str = ""):
     items = CATALOG
-    if category == "new": items = [i for i in CATALOG if i["age_days"] < 30]
-    elif category == "aged": items = [i for i in CATALOG if i["age_days"] >= 30]
-    elif category == "premium": items = [i for i in CATALOG if i["is_premium"]]
+    # Фильтрация по категориям
+    if category == "new": items = [i for i in items if i["age_days"] < 30]
+    elif category == "aged": items = [i for i in items if i["age_days"] >= 30]
+    elif category == "premium": items = [i for i in items if i["is_premium"]]
+    
+    # Фильтрация по поиску (если нужно)
+    if q:
+        q_lower = q.lower()
+        items = [i for i in items if q_lower in str(i.get("description", "")).lower() or q_lower in str(i.get("country", "")).lower()]
+        
     return {"items": items}
 
 @app.post("/api/buy")
@@ -47,13 +52,14 @@ async def api_buy(request: Request):
     data = await request.json()
     user_id = data.get("user_id")
     item_id = data.get("item_id")
-    price_stars = data.get("price") 
+    # price_stars = data.get("price") # Цена нам тут больше не нужна
 
     try:
-        # Покупка на Lolz (звезды НЕ списываются)
-        await fast_buy(item_id, price_stars)
+        # 1. Покупаем на Lolz (звезды НЕ списываются)
+        # Передаем цену как строку/число, чтобы Lolz не ругался
+        await fast_buy(item_id, 0) 
         
-        # Отправляем кнопку в бот при успехе
+        # 2. Отправляем кнопку в бот при успехе
         keyboard = InlineKeyboardMarkup(inline_keyboard=[
             [InlineKeyboardButton(text="🔑 Получить номер и код", callback_data=f"getcode_{item_id}")]
         ])
