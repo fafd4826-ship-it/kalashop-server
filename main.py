@@ -6,10 +6,10 @@ from aiogram import Bot, Dispatcher, types
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.filters import Command
 from aiogram.fsm.storage.memory import MemoryStorage
-from catalog import CATALOG, start_scheduler, refresh  # <--- ДОБАВИЛИ refresh
+from catalog import CATALOG, start_scheduler, refresh
 from config import BOT_TOKEN, WEBAPP_URL
 from db import add_purchase
-from lolz import fast_buy, get_telegram_code, search_telegram # <--- ДОБАВИЛИ search_telegram
+from lolz import fast_buy, get_telegram_code, search_telegram
 import uvicorn
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -31,19 +31,20 @@ async def global_exception_handler(request: Request, exc: Exception):
 @app.get("/api/ping")
 async def api_ping(): return {"status": "ok"}
 
+@app.get("/api/test_lolz")
+async def api_test_lolz():
+    try:
+        raw = await search_telegram()
+        return {"status": "ok", "count": len(raw), "first_item": raw[0] if raw else "СПИСОК ПУСТ"}
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+
 @app.get("/api/catalog")
 async def api_catalog(category: str = "all", q: str = ""):
     global CATALOG
-    
-    # Если каталог пустой, пробуем спарсить прямо сейчас
     if not CATALOG:
-        try:
-            print("Каталог пуст, пробуем спарсить Lolz вручную...")
-            await refresh() # Вызываем функцию обновления из catalog.py
-        except Exception as e:
-            print(f"Ошибка ручного парсинга: {e}")
-            return JSONResponse({"error": f"Ошибка Lolz API: {e}", "items": []})
-
+        await refresh()
+        
     items = CATALOG
     if category == "new": items = [i for i in items if i["age_days"] < 30]
     elif category == "aged": items = [i for i in items if i["age_days"] >= 30]
@@ -55,4 +56,69 @@ async def api_catalog(category: str = "all", q: str = ""):
         
     return {"items": items}
 
-# ... (функция api_buy и остальной код остаются БЕЗ ИЗМЕНЕНИЙ, как в прошлом сообщении) ...
+@app.post("/api/buy")
+async def api_buy(request: Request):
+    data = await request.json()
+    user_id = data.get("user_id")
+    item_id = data.get("item_id")
+
+    try:
+        await fast_buy(item_id, 0) 
+        
+        keyboard = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="🔑 Получить номер и код", callback_data=f"getcode_{item_id}")]
+        ])
+        
+        await bot.send_message(
+            chat_id=user_id, 
+            text=f"✅ Аккаунт успешно куплен!\nID лота: {item_id}\n\nНажми кнопку ниже, чтобы получить данные.",
+            reply_markup=keyboard
+        )
+        
+        return {"status": "ok"}
+        
+    except Exception as e:
+        error_str = str(e)
+        if error_str == "already_sold_or_no_rights":
+            return JSONResponse({"error": "Аккаунт уже куплен или нет прав на покупку."})
+        elif error_str == "no_lolz_funds":
+            return JSONResponse({"error": "no_lolz_funds"})
+        else:
+            return JSONResponse({"error": f"Ошибка: {error_str}"})
+
+@dp.callback_query(lambda c: c.data.startswith('getcode_'))
+async def process_get_code(callback_query: types.CallbackQuery):
+    item_id = int(callback_query.data.split('_')[1])
+    msg = await callback_query.message.answer("⏳ Запрашиваю данные у Lolz...")
+    try:
+        result_text = await get_telegram_code(item_id)
+        await msg.edit_text(f"Данные аккаунта:\n\n{result_text}")
+    except Exception as e:
+        if "wait_please" in str(e):
+            await msg.edit_text(
+                "⏳ Lolz еще обрабатывает покупку. Подождите 1-2 минуты и нажмите кнопку снова.", 
+                reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                    [InlineKeyboardButton(text="🔄 Попробовать снова", callback_data=f"getcode_{item_id}")]
+                ])
+            )
+        else:
+            await msg.edit_text(f"❌ Ошибка получения: {e}")
+
+@dp.message(Command("start"))
+async def start_cmd(message: types.Message):
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="🛒 Открыть магазин", web_app=types.WebAppInfo(url=WEBAPP_URL))]
+    ])
+    await message.answer("Добро пожаловать в магазин!", reply_markup=kb)
+
+async def main():
+    start_scheduler()
+    config = uvicorn.Config(app, host="0.0.0.0", port=8000)
+    server = uvicorn.Server(config)
+    await asyncio.gather(
+        dp.start_polling(bot),
+        server.serve()
+    )
+
+if __name__ == "__main__":
+    asyncio.run(main())
