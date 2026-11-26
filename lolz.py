@@ -25,6 +25,7 @@ async def search_telegram(country: str = None, query: str = None):
 
 async def fast_buy(item_id: int, price: float):
     async with httpx.AsyncClient() as client:
+        # Покупаем аккаунт. Звезды не при чем, это баланс Lolz.
         url = f"{BASE_URL}/item/buy" 
         r = await client.post(url, headers=HEADERS, json={"item_id": item_id, "price": price})
         
