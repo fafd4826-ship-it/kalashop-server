@@ -10,7 +10,7 @@ from aiogram.fsm.state import State, StatesGroup
 from aiogram.fsm.storage.memory import MemoryStorage
 from catalog import CATALOG, start_scheduler, refresh
 from config import BOT_TOKEN, WEBAPP_URL, ADMIN_ID
-from db import add_purchase, get_all_users
+from db import add_purchase, get_all_users, save_username
 from lolz import fast_buy, get_telegram_code, get_lolz_balance
 import uvicorn
 from fastapi.middleware.cors import CORSMiddleware
@@ -43,24 +43,28 @@ async def api_catalog(category: str = "all", country: str = None, q: str = None)
 async def api_buy(request: Request):
     data = await request.json()
     user_id = data.get("user_id")
-    item_id = data.get("item_id")
-    price = data.get("price")
+    
+    try:
+        item_id = int(data.get("item_id"))
+        price = int(data.get("price")) # Принудительно делаем целым числом
+    except:
+        return {"error": "invalid_data", "msg": "Неверный формат данных"}
     
     item = next((i for i in CATALOG if i["item_id"] == item_id), None)
-    if not item: return {"error": "not_found"}
+    if not item: return {"error": "not_found", "msg": "Аккаунт уже продан"}
     
     try:
         await bot.send_invoice(
             chat_id=user_id, title=f"Аккаунт {item['country']}",
             description=f"Покупка Telegram-аккаунта за {price} Stars",
-            payload=f"buy_item_{item_id}_{item['price_rub']}",
+            payload=f"buy_item_{item_id}_{int(item['price_rub'])}",
             provider_token="", currency="XTR", prices=[LabeledPrice(label="Аккаунт", amount=price)]
         )
         return {"success": True, "status": "invoice_sent"}
     except Exception as e:
+        print(f"ОШИБКА ОТПРАВКИ СЧЕТА: {e}") # Выведет в логи Render
         return {"error": "tg_error", "msg": str(e)}
 
-# Циклическая проверка баланса Lolzteam
 async def balance_checker():
     while True:
         balance = await get_lolz_balance()
@@ -68,14 +72,14 @@ async def balance_checker():
             try:
                 await bot.send_message(ADMIN_ID, f"⚠️ <b>ВНИМАНИЕ!</b>\nБаланс Lolzteam упал ниже 250₽.\nТекущий баланс: <b>{balance}₽</b>\nСрочно пополните счет, иначе бот не сможет покупать аккаунты!")
             except: pass
-        await asyncio.sleep(3600) # Проверка раз в час
+        await asyncio.sleep(3600)
 
 @app.on_event("startup")
 async def on_start():
     await refresh()
     start_scheduler()
     asyncio.create_task(dp.start_polling(bot))
-    asyncio.create_task(balance_checker()) # Запуск проверки баланса
+    asyncio.create_task(balance_checker())
 
 class UserState(StatesGroup):
     waiting_promo = State()
@@ -93,8 +97,7 @@ def get_main_kb(user_id):
 
 @dp.message(Command("start"))
 async def start(m: types.Message):
-    from db import save_username
-    save_username(m.from_user.id, m.from_user.username) # Сохраняем для рассылки
+    save_username(m.from_user.id, m.from_user.username)
     text = "👋 <b>Добро пожаловать в магазин аккаунтов от Калашовского!</b>\n\nЗдесь ты можешь купить качественные Telegram-аккаунты. Все аккаунты проходят строгую проверку.\n\nВыбери нужный раздел в меню ниже 👇"
     photo_url = "https://raw.githubusercontent.com/fafd4826-ship-it/kalashop-web/main/IMG_20261125_234930_839.jpg"
     await m.answer_photo(photo=photo_url, caption=text, reply_markup=get_main_kb(m.from_user.id), parse_mode="HTML")
@@ -128,15 +131,13 @@ async def success_pay(m: types.Message):
             
         except Exception as e:
             error_msg = str(e).lower()
-            # Если на Lolzteam не хватает денег
             if "balance" in error_msg or "money" in error_msg or "400" in error_msg or "402" in error_msg:
                 await m.answer("❌ <b>Аккаунт временно недоступен!</b>\nНа резерве магазина закончились средства для выкупа этого лота. Пожалуйста, выберите аккаунт дешевле.\n\n(Звезды будут возвращены, напишите @aoswat)", reply_markup=get_main_kb(m.from_user.id), parse_mode="HTML")
-                try: await bot.send_message(ADMIN_ID, f"⚠️ ОШИБКА ПОКУПКИ (нет средств Lolz):\nПользователь @{m.from_user.username} пытался купить ID {item_id}. Выберите дешевле.")
+                try: await bot.send_message(ADMIN_ID, f"⚠️ ОШИБКА (нет средств Lolz): Пользователь @{m.from_user.username} пытался купить ID {item_id}.")
                 except: pass
             else:
                 await m.answer(f"❌ Ошибка при покупке. Напишите в поддержку @aoswat для возврата средств.\nОшибка: {e}")
 
-# ================= АДМИНКА =================
 @dp.message(F.text == "👑 Админка")
 async def admin_panel(m: types.Message):
     if m.from_user.id != ADMIN_ID: return
@@ -166,7 +167,7 @@ async def process_broadcast(m: types.Message, state: FSMContext):
         try:
             await m.copy_to(chat_id=int(uid))
             success += 1
-            await asyncio.sleep(0.05) # Задержка от блокировки
+            await asyncio.sleep(0.05)
         except: pass
         
     await m.answer(f"✅ Рассылка завершена!\nДоставлено: {success} из {len(users)}", reply_markup=get_main_kb(m.from_user.id))
@@ -175,7 +176,7 @@ async def process_broadcast(m: types.Message, state: FSMContext):
 async def admin_promo(call: types.CallbackQuery, state: FSMContext):
     if call.from_user.id != ADMIN_ID: return
     await state.set_state(UserState.admin_waiting_promo_amount)
-    await call.message.answer("Введите количество звезд для промокода (например, 50):")
+    await call.message.answer("Введите количество звезд для промокода:")
     await call.answer()
 
 @dp.message(UserState.admin_waiting_promo_amount)
@@ -201,7 +202,6 @@ async def admin_history(call: types.CallbackQuery):
     await call.message.answer(text, parse_mode="HTML")
     await call.answer()
 
-# ================= ПРОМОКОДЫ (ЮЗЕР) =================
 @dp.message(F.text == "🎟 Промокоды")
 async def promocodes(m: types.Message):
     kb = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="⚙️ Ввести промокод", callback_data="enter_promo")]])
@@ -224,7 +224,6 @@ async def process_promo(m: types.Message, state: FSMContext):
     else:
         await m.answer("❌ Неверный или уже использованный промокод.", reply_markup=get_main_kb(m.from_user.id))
 
-# ================= СТАНДАРТНЫЕ КНОПКИ =================
 @dp.message(F.text == "📜 Правила")
 async def rules(m: types.Message):
     await m.answer("⚠️ <b>Правила:</b>\n1. Оплата в Stars.\n2. Гарантия 24 часа.\n3. Используйте прокси.", parse_mode="HTML")
