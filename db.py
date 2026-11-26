@@ -28,7 +28,7 @@ def update_balance(user_id, amount):
     db[uid] = db.get(uid, 0) + amount
     save_json(USERS_FILE, db)
 
-# --- Юзернеймы (чтобы переводы работали) ---
+# --- Юзернеймы ---
 def save_username(user_id, username):
     if not username: return
     db = load_json(NAMES_FILE)
@@ -38,6 +38,11 @@ def save_username(user_id, username):
 def get_id_by_username(username):
     db = load_json(NAMES_FILE)
     return db.get(username.lower().replace("@", ""))
+
+# --- Все пользователи (для рассылки) ---
+def get_all_users():
+    db = load_json(USERS_FILE)
+    return list(db.keys())
 
 # --- Промокоды ---
 def add_promo(code, amount):
