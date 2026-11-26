@@ -5,6 +5,7 @@ import datetime
 USERS_FILE = "users.json"
 PROMOS_FILE = "promos.json"
 PURCHASES_FILE = "purchases.json"
+NAMES_FILE = "usernames.json"
 
 def load_json(filename):
     if not os.path.exists(filename): return {}
@@ -27,10 +28,21 @@ def update_balance(user_id, amount):
     db[uid] = db.get(uid, 0) + amount
     save_json(USERS_FILE, db)
 
+# --- Юзернеймы (чтобы переводы работали) ---
+def save_username(user_id, username):
+    if not username: return
+    db = load_json(NAMES_FILE)
+    db[username.lower()] = user_id
+    save_json(NAMES_FILE, db)
+
+def get_id_by_username(username):
+    db = load_json(NAMES_FILE)
+    return db.get(username.lower().replace("@", ""))
+
 # --- Промокоды ---
 def add_promo(code, amount):
     db = load_json(PROMOS_FILE)
-    db[code.upper()] = {"amount": amount, "uses_left": 1} # Одноразовый
+    db[code.upper()] = {"amount": amount, "uses_left": 1}
     save_json(PROMOS_FILE, db)
 
 def use_promo(code):
@@ -38,7 +50,7 @@ def use_promo(code):
     code = code.upper()
     if code in db and db[code]["uses_left"] > 0:
         amount = db[code]["amount"]
-        del db[code] # Удаляем после использования
+        del db[code]
         save_json(PROMOS_FILE, db)
         return amount
     return None
