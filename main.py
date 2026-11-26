@@ -27,7 +27,7 @@ app = FastAPI()
 
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
 
-# Глобальный перехватчик ошибок (чтобы сайт всегда получал JSON, а не HTML)
+# Глобальный перехватчик ошибок
 @app.exception_handler(Exception)
 async def global_exception_handler(request: Request, exc: Exception):
     return JSONResponse(status_code=500, content={"error": "server_error", "msg": str(exc)})
@@ -58,7 +58,7 @@ async def api_buy(request: Request):
     item = next((i for i in CATALOG if i["item_id"] == item_id), None)
     if not item: return {"error": "not_found", "msg": "Аккаунт уже продан"}
     
-    # Безопасная проверка баланса (если упадет - пропустим)
+    # Безопасная проверка баланса Lolzteam
     try:
         balance = await get_lolz_balance()
         if balance > 0 and balance < item["price_rub"]:
