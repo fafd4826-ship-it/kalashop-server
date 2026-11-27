@@ -12,7 +12,7 @@ from aiogram.fsm.storage.memory import MemoryStorage
 from catalog import CATALOG, start_scheduler, refresh
 from config import BOT_TOKEN, WEBAPP_URL, ADMIN_ID
 from db import add_purchase, get_all_users, save_username
-from lolz import fast_buy, get_telegram_code, get_lolz_balance
+from lolz import fast_buy, get_telegram_code, get_lolz_balance, get_item_info
 import uvicorn
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -44,7 +44,35 @@ async def api_catalog(category: str = "all", country: str = None, q: str = None)
     if q: items = [i for i in items if q.lower() in (i["description"] or "").lower()]
     return {"items": items}
 
-# --- ТЕСТОВЫЙ РЕЖИМ ПОКУПКИ (БЕЗ ЗВЕЗД) ---
+# Фоновая покупка
+async def process_test_buy(user_id, item_id, price, price_rub):
+    try:
+        await bot.send_message(user_id, f"🧪 <b>ТЕСТОВЫЙ РЕЖИМ</b>\nПокупаю аккаунт ID {item_id}...\nПодождите.", parse_mode="HTML")
+        
+        # 1. Покупка
+        await fast_buy(item_id, price_rub)
+        
+        # 2. Получаем данные аккаунта (номер телефона)
+        item_info = await get_item_info(item_id)
+        phone = item_info.get("telegram_phone") or item_info.get("phone") or item_info.get("login") or "Номер скрыт"
+        
+        # 3. Отправляем сообщение с кнопкой
+        kb = InlineKeyboardMarkup(inline_keyboard=[[
+            InlineKeyboardButton(text="📩 Получить код", callback_data=f"getcode_{item_id}")
+        ]])
+        
+        await bot.send_message(
+            user_id, 
+            f"✅ <b>Аккаунт успешно куплен!</b>\n\n"
+            f"📱 Номер: <code>{phone}</code>\n\n"
+            f"Нажмите кнопку ниже, чтобы запросить код подтверждения.", 
+            reply_markup=kb, 
+            parse_mode="HTML"
+        )
+    except Exception as e:
+        error_msg = str(e)
+        await bot.send_message(user_id, f"❌ <b>ОШИБКА Lolzteam:</b>\n<code>{error_msg}</code>", parse_mode="HTML")
+
 @app.post("/api/buy")
 async def api_buy(request: Request):
     try:
@@ -57,23 +85,35 @@ async def api_buy(request: Request):
     
     item = next((i for i in CATALOG if i["item_id"] == item_id), None)
     if not item: return {"error": "not_found", "msg": "Аккаунт уже продан"}
+
+    asyncio.create_task(process_test_buy(user_id, item_id, price, item["price_rub"]))
+    return {"success": True, "status": "processing"}
+
+# ОБРАБОТЧИК КНОПКИ "ПОЛУЧИТЬ КОД"
+@dp.callback_query(F.data.startswith("getcode_"))
+async def process_get_code(call: types.CallbackQuery):
+    await call.answer("Запрашиваю код у Lolzteam...")
+    item_id = int(call.data.split("_")[1])
     
-    # Делаем покупку напрямую (для теста)
+    # Меняем текст, чтобы показать загрузку
     try:
-        await bot.send_message(user_id, f"🧪 <b>ТЕСТОВЫЙ РЕЖИМ</b>\nПробуем купить аккаунт ID {item_id} за {price}⭐ (руб: {item['price_rub']})...", parse_mode="HTML")
-        
-        # 1. Покупка
-        await fast_buy(item_id, item["price_rub"])
-        
-        # 2. Получение кода
-        code = await get_telegram_code(item_id)
-        
-        await bot.send_message(user_id, f"✅ <b>УСПЕХ!</b>\nАккаунт куплен.\nВаш код: <code>{code}</code>", parse_mode="HTML")
-        return {"success": True, "status": "test_buy_success"}
-    except Exception as e:
-        error_msg = str(e)
-        await bot.send_message(user_id, f"❌ <b>ОШИБКА Lolzteam:</b>\n<code>{error_msg}</code>", parse_mode="HTML")
-        return {"error": "lolz_error", "msg": error_msg}
+        await call.message.edit_text("⏳ <b>Запрашиваю код...</b>\nПодождите пару секунд.", parse_mode="HTML")
+    except: pass
+    
+    code = await get_telegram_code(item_id)
+    
+    # Возвращаем кнопку обратно (если нужно) или просто отправляем код
+    kb = InlineKeyboardMarkup(inline_keyboard=[[
+        InlineKeyboardButton(text="🔄 Запросить еще раз", callback_data=f"getcode_{item_id}")
+    ]])
+    
+    await call.message.edit_text(
+        f"✅ <b>Код получен!</b>\n\n"
+        f"Ваш код: <code>{code}</code>\n\n"
+        f"Введите его в Telegram при авторизации.", 
+        reply_markup=kb, 
+        parse_mode="HTML"
+    )
 
 async def balance_checker():
     while True:
@@ -120,16 +160,14 @@ async def check_balance_cmd(m: types.Message):
     balance = await get_lolz_balance()
     await m.answer(f"Текущий баланс по API: <b>{balance}₽</b>", parse_mode="HTML")
 
-# Заглушка для оплаты, чтобы не было ошибок при старых счетах
 @dp.pre_checkout_query()
 async def pre_checkout(query: PreCheckoutQuery): 
     await bot.answer_pre_checkout_query(query.id, ok=True)
 
 @dp.message(F.successful_payment)
 async def success_pay(m: types.Message):
-    await m.answer("Оплата получена, но магазин временно в тестовом режиме. Напишите @aoswat для выдачи аккаунта.")
+    await m.answer("Оплата получена, но магазин временно в тестовом режиме. Напишите @aoswat.")
 
-# ... (Остальные функции: Отзывы, Админка, Промокоды, Правила - без изменений) ...
 @dp.callback_query(F.data == "leave_review")
 async def ask_review(call: types.CallbackQuery, state: FSMContext):
     await state.set_state(UserState.waiting_review)
