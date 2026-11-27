@@ -27,13 +27,8 @@ async def fast_buy(item_id: int, price: float):
     async with httpx.AsyncClient() as client:
         r = await client.post(f"{BASE_URL}/{item_id}/fast-buy", headers=HEADERS, json={"price": price}, timeout=20.0)
         if r.status_code != 200:
-            if r.status_code == 400:
-                raise Exception(f"Аккаунт уже продан или изменилась цена.")
-            elif r.status_code == 403:
-                raise Exception(f"НЕТ ПРАВ (403). Токен не имеет доступа к покупкам, либо не куплен Market API.")
-            elif r.status_code == 402:
-                raise Exception(f"НЕДОСТАТОЧНО СРЕДСТВ на балансе Lolzteam (402).")
-            raise Exception(f"Ошибка API ({r.status_code}): {r.text}")
+            # ВЫВОДИМ ТОЧНЫЙ ОТВЕТ ОТ LOLZTEAM
+            raise Exception(f"Lolzteam (Код {r.status_code}): {r.text}")
         return r.json()
 
 async def get_item_info(item_id: int):
@@ -41,9 +36,7 @@ async def get_item_info(item_id: int):
         try:
             r = await client.get(f"{BASE_URL}/{item_id}", headers=HEADERS, timeout=10.0)
             if r.status_code == 200:
-                data = r.json()
-                if isinstance(data, dict):
-                    return data.get("item") or {}
+                return r.json().get("item", {})
             return {}
         except:
             return {}
