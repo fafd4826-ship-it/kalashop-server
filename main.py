@@ -27,7 +27,6 @@ app = FastAPI()
 
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
 
-# Глобальный перехватчик ошибок
 @app.exception_handler(Exception)
 async def global_exception_handler(request: Request, exc: Exception):
     return JSONResponse(status_code=500, content={"error": "server_error", "msg": str(exc)})
@@ -45,6 +44,7 @@ async def api_catalog(category: str = "all", country: str = None, q: str = None)
     if q: items = [i for i in items if q.lower() in (i["description"] or "").lower()]
     return {"items": items}
 
+# --- ТЕСТОВЫЙ РЕЖИМ ПОКУПКИ (БЕЗ ЗВЕЗД) ---
 @app.post("/api/buy")
 async def api_buy(request: Request):
     try:
@@ -58,32 +58,29 @@ async def api_buy(request: Request):
     item = next((i for i in CATALOG if i["item_id"] == item_id), None)
     if not item: return {"error": "not_found", "msg": "Аккаунт уже продан"}
     
-    # Безопасная проверка баланса Lolzteam
+    # Делаем покупку напрямую (для теста)
     try:
-        balance = await get_lolz_balance()
-        if balance > 0 and balance < item["price_rub"]:
-            return {"error": "no_lolz_funds", "msg": "На балансе магазина недостаточно средств. Выберите дешевле."}
+        await bot.send_message(user_id, f"🧪 <b>ТЕСТОВЫЙ РЕЖИМ</b>\nПробуем купить аккаунт ID {item_id} за {price}⭐ (руб: {item['price_rub']})...", parse_mode="HTML")
+        
+        # 1. Покупка
+        await fast_buy(item_id, item["price_rub"])
+        
+        # 2. Получение кода
+        code = await get_telegram_code(item_id)
+        
+        await bot.send_message(user_id, f"✅ <b>УСПЕХ!</b>\nАккаунт куплен.\nВаш код: <code>{code}</code>", parse_mode="HTML")
+        return {"success": True, "status": "test_buy_success"}
     except Exception as e:
-        print(f"Ошибка проверки баланса: {e}")
-        pass
-
-    try:
-        await bot.send_invoice(
-            chat_id=user_id, title=f"Аккаунт {item['country']}",
-            description=f"Покупка Telegram-аккаунта за {price} Stars",
-            payload=f"buy_item_{item_id}_{int(item['price_rub'])}",
-            provider_token="", currency="XTR", prices=[LabeledPrice(label="Аккаунт", amount=price)]
-        )
-        return {"success": True, "status": "invoice_sent"}
-    except Exception as e:
-        return {"error": "tg_error", "msg": str(e)}
+        error_msg = str(e)
+        await bot.send_message(user_id, f"❌ <b>ОШИБКА Lolzteam:</b>\n<code>{error_msg}</code>", parse_mode="HTML")
+        return {"error": "lolz_error", "msg": error_msg}
 
 async def balance_checker():
     while True:
         balance = await get_lolz_balance()
         if 0 < balance < 250:
             try:
-                await bot.send_message(ADMIN_ID, f"⚠️ <b>ВНИМАНИЕ!</b>\nБаланс Lolzteam упал ниже 250₽.\nТекущий баланс: <b>{balance}₽</b>\nСрочно пополните счет!")
+                await bot.send_message(ADMIN_ID, f"⚠️ <b>ВНИМАНИЕ!</b>\nБаланс Lolzteam упал ниже 250₽.\nТекущий баланс: <b>{balance}₽</b>")
             except: pass
         await asyncio.sleep(3600)
 
@@ -112,7 +109,7 @@ def get_main_kb(user_id):
 @dp.message(Command("start"))
 async def start(m: types.Message):
     save_username(m.from_user.id, m.from_user.username)
-    text = "👋 <b>Добро пожаловать в магазин аккаунтов от Калашовского!</b>\n\nЗдесь ты можешь купить качественные Telegram-аккаунты. Все аккаунты проходят строгую проверку.\n\nВыбери нужный раздел в меню ниже 👇"
+    text = "👋 <b>Добро пожаловать в магазин аккаунтов от Калашовского!</b>\n\nЗдесь ты можешь купить качественные Telegram-аккаунты.\n\nВыбери нужный раздел в меню ниже 👇"
     photo_url = "https://raw.githubusercontent.com/fafd4826-ship-it/kalashop-web/main/IMG_20261125_234930_839.jpg"
     await m.answer_photo(photo=photo_url, caption=text, reply_markup=get_main_kb(m.from_user.id), parse_mode="HTML")
 
@@ -123,43 +120,16 @@ async def check_balance_cmd(m: types.Message):
     balance = await get_lolz_balance()
     await m.answer(f"Текущий баланс по API: <b>{balance}₽</b>", parse_mode="HTML")
 
+# Заглушка для оплаты, чтобы не было ошибок при старых счетах
 @dp.pre_checkout_query()
 async def pre_checkout(query: PreCheckoutQuery): 
     await bot.answer_pre_checkout_query(query.id, ok=True)
 
 @dp.message(F.successful_payment)
 async def success_pay(m: types.Message):
-    payload = m.successful_payment.invoice_payload
-    
-    if payload.startswith("buy_item_"):
-        parts = payload.split("_")
-        item_id = int(parts[2])
-        price_rub = float(parts[3])
-        price_stars = m.successful_payment.total_amount
-        
-        await m.answer("✅ Оплата получена! Покупаем аккаунт на Lolzteam, подождите...")
-        
-        try:
-            await fast_buy(item_id, price_rub)
-            code = await get_telegram_code(item_id)
-            item = next((i for i in CATALOG if i["item_id"] == item_id), None)
-            phone = item['phone_prefix'] if item else "+"
-            
-            await m.answer(f"✅ <b>Успешно куплено!</b>\n\nНомер: <code>{phone}</code>\nКод: <code>{code}</code>\n\nНе забудьте использовать прокси!", reply_markup=get_main_kb(m.from_user.id), parse_mode="HTML")
-            
-            kb = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="✍️ Оставить отзыв", callback_data="leave_review")]])
-            await m.answer("Пожалуйста, оставьте отзыв о нашем магазине!", reply_markup=kb)
-            
-            add_purchase(m.from_user.id, m.from_user.username or "unknown", item_id, price_stars)
-            try: await bot.send_message(ADMIN_ID, f"💰 <b>НОВАЯ ПОКУПКА!</b>\n\nПокупатель: @{m.from_user.username} ({m.from_user.id})\nАккаунт: {item['country']} (ID: {item_id})\nЦена: {price_stars} ⭐")
-            except: pass
-            
-        except Exception as e:
-            error_msg = str(e)
-            await m.answer(f"❌ <b>Ошибка покупки:</b>\n{error_msg}\n\nСкорее всего, этот аккаунт уже купил кто-то другой, пока вы оплачивали. Напишите @aoswat для возврата звезд.", reply_markup=get_main_kb(m.from_user.id), parse_mode="HTML")
-            try: await bot.send_message(ADMIN_ID, f"⚠️ ОШИБКА ПОКУПКИ:\nПользователь @{m.from_user.username} оплатил ID {item_id}, но Lolz выдал ошибку: {error_msg}\nЗвезды нужно вернуть вручную.")
-            except: pass
+    await m.answer("Оплата получена, но магазин временно в тестовом режиме. Напишите @aoswat для выдачи аккаунта.")
 
+# ... (Остальные функции: Отзывы, Админка, Промокоды, Правила - без изменений) ...
 @dp.callback_query(F.data == "leave_review")
 async def ask_review(call: types.CallbackQuery, state: FSMContext):
     await state.set_state(UserState.waiting_review)
@@ -176,8 +146,6 @@ async def process_review(m: types.Message, state: FSMContext):
             await m.answer("✅ Спасибо! Ваш отзыв отправлен в наш канал.", reply_markup=get_main_kb(m.from_user.id))
         except Exception as e:
             await m.answer("✅ Спасибо за отзыв! (Ошибка отправки в канал)", reply_markup=get_main_kb(m.from_user.id))
-    else:
-        await m.answer("Пожалуйста, отправьте текстовый отзыв.", reply_markup=get_main_kb(m.from_user.id))
 
 @dp.message(F.text == "👑 Админка")
 async def admin_panel(m: types.Message):
@@ -202,7 +170,6 @@ async def process_broadcast(m: types.Message, state: FSMContext):
     await state.clear()
     users = get_all_users()
     await m.answer(f"⏳ Начинаю рассылку для {len(users)} пользователей...")
-    
     success = 0
     for uid in users:
         try:
@@ -210,7 +177,6 @@ async def process_broadcast(m: types.Message, state: FSMContext):
             success += 1
             await asyncio.sleep(0.05)
         except: pass
-        
     await m.answer(f"✅ Рассылка завершена!\nДоставлено: {success} из {len(users)}", reply_markup=get_main_kb(m.from_user.id))
 
 @dp.callback_query(F.data == "admin_create_promo")
