@@ -44,18 +44,21 @@ async def api_catalog(category: str = "all", country: str = None, q: str = None)
     if q: items = [i for i in items if q.lower() in (i["description"] or "").lower()]
     return {"items": items}
 
-# Фоновая покупка
 async def process_test_buy(user_id, item_id, price, price_rub):
     try:
-        await bot.send_message(user_id, f"🧪 <b>ТЕСТОВЫЙ РЕЖИМ</b>\nПокупаю аккаунт ID {item_id}...\nПодождите.", parse_mode="HTML")
+        await bot.send_message(user_id, f"🧪 <b>ТЕСТОВЫЙ РЕЖИМ</b>\nПокупаю аккаунт ID {item_id}...", parse_mode="HTML")
         
         # 1. Покупка
         await fast_buy(item_id, price_rub)
         
         # 2. Получаем данные аккаунта (номер телефона)
-        item_info = await get_item_info(item_id)
-        phone = item_info.get("telegram_phone") or item_info.get("phone") or item_info.get("login") or "Номер скрыт"
-        
+        phone = "Скрыт/Ошибка получения"
+        try:
+            item_info = await get_item_info(item_id)
+            if item_info:
+                phone = item_info.get("telegram_phone") or item_info.get("phone") or item_info.get("login") or "Скрыт"
+        except: pass
+
         # 3. Отправляем сообщение с кнопкой
         kb = InlineKeyboardMarkup(inline_keyboard=[[
             InlineKeyboardButton(text="📩 Получить код", callback_data=f"getcode_{item_id}")
@@ -70,8 +73,9 @@ async def process_test_buy(user_id, item_id, price, price_rub):
             parse_mode="HTML"
         )
     except Exception as e:
+        # ОТПРАВЛЯЕМ ОШИБКУ ПРЯМО В ЧАТ
         error_msg = str(e)
-        await bot.send_message(user_id, f"❌ <b>ОШИБКА Lolzteam:</b>\n<code>{error_msg}</code>", parse_mode="HTML")
+        await bot.send_message(user_id, f"❌ <b>ОШИБКА ПОКУПКИ Lolzteam:</b>\n\n<code>{error_msg}</code>", parse_mode="HTML")
 
 @app.post("/api/buy")
 async def api_buy(request: Request):
@@ -89,28 +93,24 @@ async def api_buy(request: Request):
     asyncio.create_task(process_test_buy(user_id, item_id, price, item["price_rub"]))
     return {"success": True, "status": "processing"}
 
-# ОБРАБОТЧИК КНОПКИ "ПОЛУЧИТЬ КОД"
 @dp.callback_query(F.data.startswith("getcode_"))
 async def process_get_code(call: types.CallbackQuery):
-    await call.answer("Запрашиваю код у Lolzteam...")
+    await call.answer("Запрашиваю код...")
     item_id = int(call.data.split("_")[1])
     
-    # Меняем текст, чтобы показать загрузку
     try:
-        await call.message.edit_text("⏳ <b>Запрашиваю код...</b>\nПодождите пару секунд.", parse_mode="HTML")
+        await call.message.edit_text("⏳ <b>Запрашиваю код...</b>", parse_mode="HTML")
     except: pass
     
     code = await get_telegram_code(item_id)
     
-    # Возвращаем кнопку обратно (если нужно) или просто отправляем код
     kb = InlineKeyboardMarkup(inline_keyboard=[[
         InlineKeyboardButton(text="🔄 Запросить еще раз", callback_data=f"getcode_{item_id}")
     ]])
     
     await call.message.edit_text(
         f"✅ <b>Код получен!</b>\n\n"
-        f"Ваш код: <code>{code}</code>\n\n"
-        f"Введите его в Telegram при авторизации.", 
+        f"Ваш код: <code>{code}</code>", 
         reply_markup=kb, 
         parse_mode="HTML"
     )
@@ -149,7 +149,7 @@ def get_main_kb(user_id):
 @dp.message(Command("start"))
 async def start(m: types.Message):
     save_username(m.from_user.id, m.from_user.username)
-    text = "👋 <b>Добро пожаловать в магазин аккаунтов от Калашовского!</b>\n\nЗдесь ты можешь купить качественные Telegram-аккаунты.\n\nВыбери нужный раздел в меню ниже 👇"
+    text = "👋 <b>Добро пожаловать в магазин аккаунтов от Калашовского!</b>\n\nЗдесь ты можешь купить качественные Telegram-аккаунты."
     photo_url = "https://raw.githubusercontent.com/fafd4826-ship-it/kalashop-web/main/IMG_20261125_234930_839.jpg"
     await m.answer_photo(photo=photo_url, caption=text, reply_markup=get_main_kb(m.from_user.id), parse_mode="HTML")
 
