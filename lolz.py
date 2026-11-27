@@ -32,6 +32,14 @@ async def fast_buy(item_id: int, price: float):
             raise Exception(f"Ошибка API: {r.text}")
         return r.json()
 
+# НОВАЯ ФУНКЦИЯ: Получение данных об аккаунте (для номера телефона)
+async def get_item_info(item_id: int):
+    async with httpx.AsyncClient() as client:
+        r = await client.get(f"{BASE_URL}/{item_id}", headers=HEADERS, timeout=15.0)
+        if r.status_code != 200:
+            return {"phone": "Неизвестно"}
+        return r.json().get("item", {})
+
 async def get_telegram_code(item_id: int):
     async with httpx.AsyncClient() as client:
         r = await client.post(f"{BASE_URL}/{item_id}/telegram-code", headers=HEADERS, timeout=15.0)
@@ -45,17 +53,10 @@ async def get_lolz_balance():
             r = await client.get(f"{BASE_URL}/me", headers=HEADERS, timeout=10.0)
             if r.status_code == 200:
                 data = r.json()
-                print(f"ОТВЕТ ОТ LOLZ (BALANCE): {data}") # Выведет ответ в логи Render
-                
-                # Пробуем найти баланс в разных местах
                 if "user" in data and "balance" in data["user"]:
                     return float(data["user"]["balance"])
                 elif "balance" in data:
                     return float(data["balance"])
-                return 0.0
-            else:
-                print(f"ОШИБКА LOLZ API (BALANCE): {r.status_code} - {r.text}")
-                return 0.0
-        except Exception as e:
-            print(f"ИСКЛЮЧЕНИЕ LOLZ (BALANCE): {e}")
+            return 0.0
+        except:
             return 0.0
