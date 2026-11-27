@@ -25,27 +25,38 @@ async def search_telegram(country: str = None, query: str = None):
 
 async def fast_buy(item_id: int, price: float):
     async with httpx.AsyncClient() as client:
-        r = await client.post(f"{BASE_URL}/{item_id}/fast-buy", headers=HEADERS, json={"price": price}, timeout=15.0)
+        r = await client.post(f"{BASE_URL}/{item_id}/fast-buy", headers=HEADERS, json={"price": price}, timeout=20.0)
         if r.status_code != 200:
             if r.status_code == 400:
-                raise Exception("Аккаунт уже продан или цена изменилась.")
-            raise Exception(f"Ошибка API: {r.text}")
+                raise Exception(f"Аккаунт уже продан или изменилась цена.")
+            elif r.status_code == 403:
+                raise Exception(f"НЕТ ПРАВ (403). Токен не имеет доступа к покупкам, либо не куплен Market API.")
+            elif r.status_code == 402:
+                raise Exception(f"НЕДОСТАТОЧНО СРЕДСТВ на балансе Lolzteam (402).")
+            raise Exception(f"Ошибка API ({r.status_code}): {r.text}")
         return r.json()
 
-# НОВАЯ ФУНКЦИЯ: Получение данных об аккаунте (для номера телефона)
 async def get_item_info(item_id: int):
     async with httpx.AsyncClient() as client:
-        r = await client.get(f"{BASE_URL}/{item_id}", headers=HEADERS, timeout=15.0)
-        if r.status_code != 200:
-            return {"phone": "Неизвестно"}
-        return r.json().get("item", {})
+        try:
+            r = await client.get(f"{BASE_URL}/{item_id}", headers=HEADERS, timeout=10.0)
+            if r.status_code == 200:
+                data = r.json()
+                if isinstance(data, dict):
+                    return data.get("item") or {}
+            return {}
+        except:
+            return {}
 
 async def get_telegram_code(item_id: int):
     async with httpx.AsyncClient() as client:
-        r = await client.post(f"{BASE_URL}/{item_id}/telegram-code", headers=HEADERS, timeout=15.0)
-        if r.status_code != 200: return "Код не получен (ошибка API)"
-        data = r.json()
-        return data.get("code", "Код не найден в ответе")
+        try:
+            r = await client.post(f"{BASE_URL}/{item_id}/telegram-code", headers=HEADERS, timeout=15.0)
+            if r.status_code != 200: return f"Ошибка API: {r.text}"
+            data = r.json()
+            return data.get("code", "Код не найден")
+        except:
+            return "Ошибка сети"
 
 async def get_lolz_balance():
     async with httpx.AsyncClient() as client:
