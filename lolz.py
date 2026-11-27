@@ -2,19 +2,19 @@ import httpx
 from config import LOLZTEAM_TOKEN
 
 BASE_URL = "https://api.lzt.market"
-HEADERS = {"Authorization": f"Bearer {LOLZTEAM_TOKEN}"}
+HEADERS = {"Authorization": f"Bearer {LOLZTEAM_TOKEN}", "Accept": "application/json"}
 
 async def search_telegram(country: str = None, query: str = None):
     params = {}
     if country: params["country"] = country
     if query: params["keyword"] = query
-
+    
     all_items = []
     async with httpx.AsyncClient() as client:
-        for page in range(1, 3):
+        for page in range(1, 11):
             try:
                 params["page"] = page
-                r = await client.get(f"{BASE_URL}/telegram", headers=HEADERS, params=params)
+                r = await client.get(f"{BASE_URL}/telegram", headers=HEADERS, params=params, timeout=15.0)
                 if r.status_code != 200: break
                 data = r.json()
                 items = data.get("items", [])
@@ -25,42 +25,37 @@ async def search_telegram(country: str = None, query: str = None):
 
 async def fast_buy(item_id: int, price: float):
     async with httpx.AsyncClient() as client:
-        payload = {"item_id": item_id, "price": price}
-        
-        # Оставляем только один самый вероятный эндпоинт для покупки
-        # (Если Lolz опять выдаст 404, мы поймем, что дело в токене)
-        url = f"{BASE_URL}/item/buy"
-        
-        r = await client.post(url, headers=HEADERS, json=payload)
-        
-        # Если Lolz вернул ошибку, мы покажем её пользователю, а не будем молчать
+        r = await client.post(f"{BASE_URL}/{item_id}/fast-buy", headers=HEADERS, json={"price": price}, timeout=15.0)
         if r.status_code != 200:
-            # Если 401/403 - скорее всего токен без прав
-            if r.status_code in [401, 403]:
-                raise Exception(f"У токена нет прав на покупку! Код: {r.status_code}. Ответ: {r.text}")
-            
-            # Если 404 - возможно, эндпоинт неверный
-            if r.status_code == 404:
-                raise Exception(f"Lolz пишет 'Страница не найдена'. Возможно, неверный URL в коде.")
-                
-            raise Exception(f"Ошибка Lolz ({r.status_code}): {r.text}")
-            
+            if r.status_code == 400:
+                raise Exception("Аккаунт уже продан или цена изменилась.")
+            raise Exception(f"Ошибка API: {r.text}")
         return r.json()
 
 async def get_telegram_code(item_id: int):
     async with httpx.AsyncClient() as client:
-        # Аналогично для получения кода
-        url = f"{BASE_URL}/item/check-account"
-        r = await client.post(url, headers=HEADERS, json={"item_id": item_id})
-        
-        if r.status_code == 403 or "нет прав" in r.text.lower():
-            raise Exception("wait_please")
-            
-        if r.status_code != 200:
-            return f"Ошибка API Lolz ({r.status_code}): {r.text}"
-            
+        r = await client.post(f"{BASE_URL}/{item_id}/telegram-code", headers=HEADERS, timeout=15.0)
+        if r.status_code != 200: return "Код не получен (ошибка API)"
         data = r.json()
-        phone = data.get("phone", "Номер не найден")
-        code = data.get("code", "Код не найден")
-        
-        return f"📱 Номер: {phone}\n🔑 Код: {code}"
+        return data.get("code", "Код не найден в ответе")
+
+async def get_lolz_balance():
+    async with httpx.AsyncClient() as client:
+        try:
+            r = await client.get(f"{BASE_URL}/me", headers=HEADERS, timeout=10.0)
+            if r.status_code == 200:
+                data = r.json()
+                print(f"ОТВЕТ ОТ LOLZ (BALANCE): {data}") # Выведет ответ в логи Render
+                
+                # Пробуем найти баланс в разных местах
+                if "user" in data and "balance" in data["user"]:
+                    return float(data["user"]["balance"])
+                elif "balance" in data:
+                    return float(data["balance"])
+                return 0.0
+            else:
+                print(f"ОШИБКА LOLZ API (BALANCE): {r.status_code} - {r.text}")
+                return 0.0
+        except Exception as e:
+            print(f"ИСКЛЮЧЕНИЕ LOLZ (BALANCE): {e}")
+            return 0.0
