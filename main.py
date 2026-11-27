@@ -48,10 +48,8 @@ async def process_test_buy(user_id, item_id, price, price_rub):
     try:
         await bot.send_message(user_id, f"🧪 <b>ТЕСТОВЫЙ РЕЖИМ</b>\nПокупаю аккаунт ID {item_id}...", parse_mode="HTML")
         
-        # 1. Покупка
         await fast_buy(item_id, price_rub)
         
-        # 2. Получаем данные аккаунта (номер телефона)
         phone = "Скрыт/Ошибка получения"
         try:
             item_info = await get_item_info(item_id)
@@ -59,7 +57,6 @@ async def process_test_buy(user_id, item_id, price, price_rub):
                 phone = item_info.get("telegram_phone") or item_info.get("phone") or item_info.get("login") or "Скрыт"
         except: pass
 
-        # 3. Отправляем сообщение с кнопкой
         kb = InlineKeyboardMarkup(inline_keyboard=[[
             InlineKeyboardButton(text="📩 Получить код", callback_data=f"getcode_{item_id}")
         ]])
@@ -73,9 +70,8 @@ async def process_test_buy(user_id, item_id, price, price_rub):
             parse_mode="HTML"
         )
     except Exception as e:
-        # ОТПРАВЛЯЕМ ОШИБКУ ПРЯМО В ЧАТ
         error_msg = str(e)
-        await bot.send_message(user_id, f"❌ <b>ОШИБКА ПОКУПКИ Lolzteam:</b>\n\n<code>{error_msg}</code>", parse_mode="HTML")
+        await bot.send_message(user_id, f"❌ <b>ОШИБКА Lolzteam:</b>\n\n<code>{error_msg}</code>", parse_mode="HTML")
 
 @app.post("/api/buy")
 async def api_buy(request: Request):
@@ -92,6 +88,17 @@ async def api_buy(request: Request):
 
     asyncio.create_task(process_test_buy(user_id, item_id, price, item["price_rub"]))
     return {"success": True, "status": "processing"}
+
+# РУЧНОЙ ТЕСТ ПОКУПКИ (Только для админа)
+@dp.message(Command("testbuy"))
+async def cmd_testbuy(m: types.Message):
+    if m.from_user.id != ADMIN_ID: return
+    if not CATALOG:
+        return await m.answer("Каталог пуст.")
+    
+    item = CATALOG[0]
+    await m.answer(f"Пробую купить первый аккаунт из каталога (ID: {item['item_id']}, Цена: {item['price_rub']}₽)...")
+    asyncio.create_task(process_test_buy(m.from_user.id, item["item_id"], item["price_stars"], item["price_rub"]))
 
 @dp.callback_query(F.data.startswith("getcode_"))
 async def process_get_code(call: types.CallbackQuery):
@@ -149,7 +156,7 @@ def get_main_kb(user_id):
 @dp.message(Command("start"))
 async def start(m: types.Message):
     save_username(m.from_user.id, m.from_user.username)
-    text = "👋 <b>Добро пожаловать в магазин аккаунтов от Калашовского!</b>\n\nЗдесь ты можешь купить качественные Telegram-аккаунты."
+    text = "👋 <b>Добро пожаловать в магазин аккаунтов от Калашовского!</b>"
     photo_url = "https://raw.githubusercontent.com/fafd4826-ship-it/kalashop-web/main/IMG_20261125_234930_839.jpg"
     await m.answer_photo(photo=photo_url, caption=text, reply_markup=get_main_kb(m.from_user.id), parse_mode="HTML")
 
@@ -166,7 +173,7 @@ async def pre_checkout(query: PreCheckoutQuery):
 
 @dp.message(F.successful_payment)
 async def success_pay(m: types.Message):
-    await m.answer("Оплата получена, но магазин временно в тестовом режиме. Напишите @aoswat.")
+    await m.answer("Оплата получена, но магазин временно в тестовом режиме.")
 
 @dp.callback_query(F.data == "leave_review")
 async def ask_review(call: types.CallbackQuery, state: FSMContext):
