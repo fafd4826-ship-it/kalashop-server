@@ -48,11 +48,12 @@ async def process_test_buy(user_id, item_id, price, price_rub):
     try:
         await bot.send_message(user_id, f"🧪 <b>ТЕСТОВЫЙ РЕЖИМ</b>\nПокупаю аккаунт ID {item_id}...", parse_mode="HTML")
         
-        await fast_buy(item_id, price_rub)
+        # Ждем не более 15 секунд
+        await asyncio.wait_for(fast_buy(item_id, price_rub), timeout=15.0)
         
         phone = "Скрыт/Ошибка получения"
         try:
-            item_info = await get_item_info(item_id)
+            item_info = await asyncio.wait_for(get_item_info(item_id), timeout=5.0)
             if item_info:
                 phone = item_info.get("telegram_phone") or item_info.get("phone") or item_info.get("login") or "Скрыт"
         except: pass
@@ -69,6 +70,8 @@ async def process_test_buy(user_id, item_id, price, price_rub):
             reply_markup=kb, 
             parse_mode="HTML"
         )
+    except asyncio.TimeoutError:
+         await bot.send_message(user_id, f"❌ <b>Таймаут покупки:</b>\nСервер Lolzteam не ответил за 15 секунд. Попробуйте еще раз.", parse_mode="HTML")
     except Exception as e:
         error_msg = str(e)
         await bot.send_message(user_id, f"❌ <b>ОШИБКА Lolzteam:</b>\n\n<code>{error_msg}</code>", parse_mode="HTML")
@@ -89,45 +92,31 @@ async def api_buy(request: Request):
     asyncio.create_task(process_test_buy(user_id, item_id, price, item["price_rub"]))
     return {"success": True, "status": "processing"}
 
-# РУЧНОЙ ТЕСТ ПОКУПКИ (Только для админа)
 @dp.message(Command("testbuy"))
 async def cmd_testbuy(m: types.Message):
     if m.from_user.id != ADMIN_ID: return
-    if not CATALOG:
-        return await m.answer("Каталог пуст.")
-    
+    if not CATALOG: return await m.answer("Каталог пуст.")
     item = CATALOG[0]
-    await m.answer(f"Пробую купить первый аккаунт из каталога (ID: {item['item_id']}, Цена: {item['price_rub']}₽)...")
+    await m.answer(f"Пробую купить аккаунт ID: {item['item_id']}...")
     asyncio.create_task(process_test_buy(m.from_user.id, item["item_id"], item["price_stars"], item["price_rub"]))
 
 @dp.callback_query(F.data.startswith("getcode_"))
 async def process_get_code(call: types.CallbackQuery):
     await call.answer("Запрашиваю код...")
     item_id = int(call.data.split("_")[1])
-    
-    try:
-        await call.message.edit_text("⏳ <b>Запрашиваю код...</b>", parse_mode="HTML")
+    try: await call.message.edit_text("⏳ <b>Запрашиваю код...</b>", parse_mode="HTML")
     except: pass
     
     code = await get_telegram_code(item_id)
     
-    kb = InlineKeyboardMarkup(inline_keyboard=[[
-        InlineKeyboardButton(text="🔄 Запросить еще раз", callback_data=f"getcode_{item_id}")
-    ]])
-    
-    await call.message.edit_text(
-        f"✅ <b>Код получен!</b>\n\n"
-        f"Ваш код: <code>{code}</code>", 
-        reply_markup=kb, 
-        parse_mode="HTML"
-    )
+    kb = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="🔄 Запросить еще раз", callback_data=f"getcode_{item_id}")]])
+    await call.message.edit_text(f"✅ <b>Код получен!</b>\n\nВаш код: <code>{code}</code>", reply_markup=kb, parse_mode="HTML")
 
 async def balance_checker():
     while True:
         balance = await get_lolz_balance()
         if 0 < balance < 250:
-            try:
-                await bot.send_message(ADMIN_ID, f"⚠️ <b>ВНИМАНИЕ!</b>\nБаланс Lolzteam упал ниже 250₽.\nТекущий баланс: <b>{balance}₽</b>")
+            try: await bot.send_message(ADMIN_ID, f"⚠️ <b>ВНИМАНИЕ!</b>\nБаланс Lolzteam упал ниже 250₽.\nТекущий баланс: <b>{balance}₽</b>")
             except: pass
         await asyncio.sleep(3600)
 
